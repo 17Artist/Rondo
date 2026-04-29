@@ -15,6 +15,10 @@ blink {
     packageName.set("priv.seventeen.artist.rondo")
     description.set("A universal multi-currency economy system")
     softDepend.set(listOf("Vault", "PlaceholderAPI"))
+    libraries.set(listOf(
+        "com.zaxxer:HikariCP:5.1.0",
+        "org.xerial:sqlite-jdbc:3.44.1.0"
+    ))
 }
 
 repositories {
@@ -30,18 +34,12 @@ dependencies {
     compileOnly("org.spigotmc:spigot-api:1.18.2-R0.1-SNAPSHOT")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1")
     compileOnly("me.clip:placeholderapi:2.11.6")
-    implementation("com.zaxxer:HikariCP:5.1.0")
-    implementation("org.xerial:sqlite-jdbc:3.44.1.0")
+    compileOnly("com.zaxxer:HikariCP:5.1.0")
+    compileOnly("org.xerial:sqlite-jdbc:3.44.1.0")
 }
 
 kotlin {
     jvmToolchain(17)
-}
-
-tasks.shadowJar {
-    archiveClassifier.set("")
-    relocate("com.zaxxer.hikari", "priv.seventeen.artist.rondo.libs.hikari")
-    relocate("org.sqlite", "priv.seventeen.artist.rondo.libs.sqlite")
 }
 
 tasks.named("build") {
