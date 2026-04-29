@@ -7,7 +7,7 @@ export default defineConfig({
   base: '/Rondo/',
 
   head: [
-    ['link', { rel: 'icon', href: '/Rondo/favicon.ico' }]
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/Rondo/logo.svg' }]
   ],
 
   themeConfig: {

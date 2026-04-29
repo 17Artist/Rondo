@@ -5,6 +5,9 @@ hero:
   name: Rondo
   text: 通用多经济系统
   tagline: 配置驱动、高性能、可扩展的 Minecraft 多货币经济插件
+  image:
+    src: /logo.svg
+    alt: Rondo
   actions:
     - theme: brand
       text: 快速开始
