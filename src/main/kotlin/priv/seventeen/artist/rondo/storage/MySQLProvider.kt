@@ -156,7 +156,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         }
     }
 
-    override fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String): Boolean {
+    override fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean): Boolean {
         getConnection().use { conn ->
             conn.autoCommit = false
             try {
@@ -173,6 +173,8 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                 // 更新余额
                 val sql = if (delta >= BigDecimal.ZERO) {
                     "UPDATE rondo_balance SET balance = balance + ?, total_earned = total_earned + ? WHERE player_uuid = ? AND currency_id = ?"
+                } else if (allowNegative) {
+                    "UPDATE rondo_balance SET balance = balance + ?, total_spent = total_spent + ? WHERE player_uuid = ? AND currency_id = ?"
                 } else {
                     "UPDATE rondo_balance SET balance = balance + ?, total_spent = total_spent + ? WHERE player_uuid = ? AND currency_id = ? AND balance + ? >= 0"
                 }
@@ -181,7 +183,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                     ps.setBigDecimal(2, delta.abs())
                     ps.setString(3, playerUuid.toString())
                     ps.setString(4, currencyId)
-                    if (delta < BigDecimal.ZERO) {
+                    if (delta < BigDecimal.ZERO && !allowNegative) {
                         ps.setBigDecimal(5, delta)
                     }
                     val rows = ps.executeUpdate()

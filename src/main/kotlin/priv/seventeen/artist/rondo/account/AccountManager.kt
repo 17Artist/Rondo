@@ -129,7 +129,9 @@ object AccountManager {
         if (online != null) {
             return online.withdraw(currencyId, amount)
         }
-        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount.negate(), source)
+        val currency = priv.seventeen.artist.rondo.currency.CurrencyRegistry.get(currencyId)
+        val allowNegative = currency?.negativeAllowed ?: false
+        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount.negate(), source, allowNegative)
     }
 
     /** 离线操作：设置余额 */

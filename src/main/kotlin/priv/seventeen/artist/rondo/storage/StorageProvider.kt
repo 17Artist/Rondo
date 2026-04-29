@@ -27,7 +27,7 @@ interface StorageProvider {
     fun saveBalancesBatch(entries: List<BalanceEntry>)
 
     /** 直接更新离线玩家余额（原子操作） */
-    fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String): Boolean
+    fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean = false): Boolean
 
     /** 获取离线玩家余额 */
     fun getOfflineBalance(playerUuid: UUID, currencyId: String): BalanceData?
