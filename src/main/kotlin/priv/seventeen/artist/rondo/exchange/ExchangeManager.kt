@@ -1,9 +1,11 @@
 package priv.seventeen.artist.rondo.exchange
 
 import org.bukkit.Bukkit
-import org.bukkit.configuration.file.YamlConfiguration
 import priv.seventeen.artist.blink.BlinkLog
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
+import priv.seventeen.artist.blink.config.BlinkConfig
+import priv.seventeen.artist.blink.config.BlinkSection
+import priv.seventeen.artist.blink.config.ConfigKey
 import priv.seventeen.artist.rondo.account.AccountManager
 import priv.seventeen.artist.rondo.api.EconomyExchangeEvent
 import priv.seventeen.artist.rondo.api.ExchangeResult
@@ -13,10 +15,48 @@ import priv.seventeen.artist.rondo.currency.ExchangeRule
 import priv.seventeen.artist.rondo.log.LogManager
 import priv.seventeen.artist.rondo.log.TransactionLog
 import priv.seventeen.artist.rondo.storage.StorageManager
-import java.io.File
 import java.math.BigDecimal
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * 兑换配置文件 (exchange.yml)
+ */
+class ExchangeConfig : BlinkConfig(bukkitPlugin, "exchange") {
+
+    var exchanges: MutableMap<String, ExchangeRuleSection> = mutableMapOf()
+}
+
+/**
+ * 单条兑换规则的配置节
+ */
+class ExchangeRuleSection : BlinkSection() {
+    var from: String = ""
+    var to: String = ""
+    var rate: String = "1"
+
+    @ConfigKey("min-amount")
+    var minAmount: String = "1"
+
+    @ConfigKey("max-per-period")
+    var maxPerPeriod: Int = -1
+
+    var period: String = "NONE"
+    var enabled: Boolean = true
+
+    fun toRule(id: String): ExchangeRule {
+        return ExchangeRule(
+            id = id,
+            fromCurrency = from,
+            toCurrency = to,
+            rate = BigDecimal(rate),
+            minAmount = BigDecimal(minAmount),
+            maxPerPeriod = maxPerPeriod,
+            period = try { ExchangePeriod.valueOf(period.uppercase()) } catch (_: Exception) { ExchangePeriod.NONE },
+            enabled = enabled
+        )
+    }
+}
 
 /**
  * 货币兑换管理器
@@ -24,6 +64,7 @@ import java.util.concurrent.ConcurrentHashMap
 object ExchangeManager {
 
     private val rules = ConcurrentHashMap<String, ExchangeRule>()
+    private lateinit var config: ExchangeConfig
 
     fun initialize() {
         loadRules()
@@ -52,12 +93,10 @@ object ExchangeManager {
         val fromCurrency = CurrencyRegistry.get(rule.fromCurrency) ?: return ExchangeResult(false, "源货币不存在")
         val toCurrency = CurrencyRegistry.get(rule.toCurrency) ?: return ExchangeResult(false, "目标货币不存在")
 
-        // 检查最小数量
         if (targetAmount < rule.minAmount) {
             return ExchangeResult(false, "最小兑换数量为 ${rule.minAmount}")
         }
 
-        // 检查周期限购
         if (rule.maxPerPeriod > 0 && rule.period != ExchangePeriod.NONE) {
             val sinceTimestamp = getPeriodStart(rule.period)
             val used = StorageManager.provider.queryExchangeCount(player, ruleId, sinceTimestamp)
@@ -67,40 +106,32 @@ object ExchangeManager {
             }
         }
 
-        // 计算消耗
         val fromAmount = rule.calculateCost(targetAmount)
 
-        // 检查余额
         val balance = AccountManager.getBalance(player, rule.fromCurrency)
         if (balance < fromAmount) {
             return ExchangeResult(false, "余额不足，需要 ${fromCurrency.format(fromAmount)}", fromAmount = fromAmount)
         }
 
-        // 触发事件
         val event = EconomyExchangeEvent(player, fromCurrency, toCurrency, fromAmount, targetAmount)
         Bukkit.getPluginManager().callEvent(event)
         if (event.isCancelled) return ExchangeResult(false, "兑换被取消")
 
-        // 执行扣款
         val withdrawSuccess = AccountManager.withdrawOffline(player, rule.fromCurrency, fromAmount, "exchange:$ruleId")
         if (!withdrawSuccess) return ExchangeResult(false, "扣款失败")
 
-        // 执行存入
         val depositSuccess = AccountManager.depositOffline(player, rule.toCurrency, targetAmount, "exchange:$ruleId")
         if (!depositSuccess) {
-            // 回滚
             AccountManager.depositOffline(player, rule.fromCurrency, fromAmount, "exchange:rollback:$ruleId")
             return ExchangeResult(false, "存入失败")
         }
 
-        // 记录兑换（限购计数）
         try {
             StorageManager.provider.insertExchangeRecord(player, ruleId, targetAmount)
         } catch (e: Exception) {
             BlinkLog.warn("Failed to insert exchange record for $player/$ruleId: ${e.message}")
         }
 
-        // 记录日志
         val fromBalance = AccountManager.getBalance(player, rule.fromCurrency)
         val toBalance = AccountManager.getBalance(player, rule.toCurrency)
 
@@ -122,37 +153,19 @@ object ExchangeManager {
 
     private fun loadRules() {
         rules.clear()
-        val file = File(Rondo.plugin.dataFolder, "exchange.yml")
-        if (!file.exists()) {
-            Rondo.plugin.saveResource("exchange.yml", false)
-        }
-        if (!file.exists()) return
+        config = ExchangeConfig()
+        config.load()
 
-        val config: YamlConfiguration = YamlConfiguration.loadConfiguration(file)
-        val section = config.getConfigurationSection("exchanges") ?: return
-
-        for (key in section.getKeys(false)) {
-            val ruleSection = section.getConfigurationSection(key) ?: continue
+        for ((key, section) in config.exchanges) {
             try {
-                val rule = ExchangeRule(
-                    id = key,
-                    fromCurrency = ruleSection.getString("from") ?: continue,
-                    toCurrency = ruleSection.getString("to") ?: continue,
-                    rate = BigDecimal(ruleSection.getString("rate") ?: "1"),
-                    minAmount = BigDecimal(ruleSection.getString("min-amount") ?: "1"),
-                    maxPerPeriod = ruleSection.getInt("max-per-period", -1),
-                    period = try {
-                        ExchangePeriod.valueOf(ruleSection.getString("period")?.uppercase() ?: "NONE")
-                    } catch (_: Exception) { ExchangePeriod.NONE },
-                    enabled = ruleSection.getBoolean("enabled", true)
-                )
+                val rule = section.toRule(key)
                 rules[key] = rule
-                BlinkLog.info("Loaded exchange rule: $key (${rule.fromCurrency} -> ${rule.toCurrency})")
+                BlinkLog.info("已加载兑换规则 §b$key §f(${rule.fromCurrency} -> ${rule.toCurrency})")
             } catch (e: Exception) {
-                BlinkLog.warn("Failed to load exchange rule '$key': ${e.message}")
+                BlinkLog.warn("加载兑换规则失败 '$key': ${e.message}")
             }
         }
-        BlinkLog.info("Loaded ${rules.size} exchange rules.")
+        BlinkLog.info("已加载 §b${rules.size} §f条兑换规则")
     }
 
     private fun getPeriodStart(period: ExchangePeriod): Long {

@@ -6,7 +6,7 @@ import priv.seventeen.artist.blink.command.BlinkCommand
 import priv.seventeen.artist.blink.command.BlinkCommandRegistrar
 import priv.seventeen.artist.blink.command.CommandContext
 import priv.seventeen.artist.blink.command.SenderType
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.config.MessageConfig
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
@@ -22,10 +22,9 @@ import java.util.*
  */
 object MoneyCommand {
 
-    private lateinit var messages: MessageConfig
+    private val messages get() = MessageConfig.instance
 
-    fun register(messages: MessageConfig) {
-        this.messages = messages
+    fun register() {
 
         val cmd = BlinkCommand("money")
             .command("", "查看所有货币余额", sender = SenderType.PLAYER) { ctx ->
@@ -60,7 +59,7 @@ object MoneyCommand {
                 CurrencyRegistry.getIds().toList()
             }
 
-        BlinkCommandRegistrar.register(Rondo.plugin, cmd)
+        BlinkCommandRegistrar.register(bukkitPlugin, cmd)
     }
 
     private fun showAllBalances(ctx: CommandContext) {

@@ -5,7 +5,7 @@ import priv.seventeen.artist.blink.command.BlinkCommand
 import priv.seventeen.artist.blink.command.BlinkCommandRegistrar
 import priv.seventeen.artist.blink.command.CommandContext
 import priv.seventeen.artist.blink.command.SenderType
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.config.MainConfig
 import priv.seventeen.artist.rondo.config.MessageConfig
@@ -22,12 +22,9 @@ import java.util.*
  */
 object AdminCommand {
 
-    private lateinit var messages: MessageConfig
-    private lateinit var mainConfig: MainConfig
+    private val messages get() = MessageConfig.instance
 
-    fun register(messages: MessageConfig, mainConfig: MainConfig) {
-        this.messages = messages
-        this.mainConfig = mainConfig
+    fun register() {
 
         val cmd = BlinkCommand("rondo")
             .command("give", "发放货币", permission = "rondo.admin",
@@ -64,7 +61,7 @@ object AdminCommand {
                 CurrencyRegistry.getIds().toList()
             }
 
-        BlinkCommandRegistrar.register(Rondo.plugin, cmd)
+        BlinkCommandRegistrar.register(bukkitPlugin, cmd)
     }
 
     private fun resolvePlayer(name: String): UUID? {
@@ -275,12 +272,12 @@ object AdminCommand {
     }
 
     private fun handleReload(ctx: CommandContext) {
-        mainConfig.reload()
-        messages.reload()
+        MainConfig.reload()
+        MessageConfig.reload()
         CurrencyRegistry.reload()
         ExchangeManager.reload()
         // 异步刷新排行榜
-        Bukkit.getScheduler().runTaskAsynchronously(Rondo.plugin, Runnable {
+        Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, Runnable {
             RankingManager.refreshAll()
         })
         ctx.reply(messages.reloadSuccess.replace("{prefix}", messages.prefix))

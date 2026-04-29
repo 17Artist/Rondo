@@ -4,7 +4,6 @@ import me.clip.placeholderapi.expansion.PlaceholderExpansion
 import org.bukkit.Bukkit
 import org.bukkit.OfflinePlayer
 import priv.seventeen.artist.blink.BlinkLog
-import priv.seventeen.artist.rondo.Rondo
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
 import priv.seventeen.artist.rondo.ranking.RankingManager

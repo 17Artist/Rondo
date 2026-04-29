@@ -15,6 +15,7 @@ blink {
     packageName.set("priv.seventeen.artist.rondo")
     description.set("A universal multi-currency economy system")
     softDepend.set(listOf("Vault", "PlaceholderAPI"))
+    logPrefix.set("§6✦ §eRondo")
     libraries.set(listOf(
         "com.zaxxer:HikariCP:5.1.0",
         "org.xerial:sqlite-jdbc:3.44.1.0"
@@ -30,7 +31,7 @@ repositories {
 }
 
 dependencies {
-    implementation("priv.seventeen.artist.blink:blink-common:1.1.0")
+    implementation("priv.seventeen.artist.blink:blink-common:1.0.7")
     compileOnly("org.spigotmc:spigot-api:1.18.2-R0.1-SNAPSHOT")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1")
     compileOnly("me.clip:placeholderapi:2.11.6")

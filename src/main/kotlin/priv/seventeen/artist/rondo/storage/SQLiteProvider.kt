@@ -1,7 +1,7 @@
 package priv.seventeen.artist.rondo.storage
 
 import priv.seventeen.artist.blink.BlinkLog
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.log.TransactionLog
 import java.io.File
 import java.math.BigDecimal
@@ -18,7 +18,7 @@ class SQLiteProvider : StorageProvider {
     private val lock = Any()
 
     override fun initialize() {
-        val dbFile = File(Rondo.plugin.dataFolder, "data.db")
+        val dbFile = File(bukkitPlugin.dataFolder, "data.db")
         if (!dbFile.parentFile.exists()) dbFile.parentFile.mkdirs()
         connection = DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}")
         connection.createStatement().use { stmt ->
@@ -40,7 +40,7 @@ class SQLiteProvider : StorageProvider {
     private fun getConnection(): Connection {
         synchronized(lock) {
             if (connection.isClosed) {
-                val dbFile = File(Rondo.plugin.dataFolder, "data.db")
+                val dbFile = File(bukkitPlugin.dataFolder, "data.db")
                 connection = DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}")
             }
             return connection

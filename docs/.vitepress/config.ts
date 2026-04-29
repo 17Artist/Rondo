@@ -77,7 +77,7 @@ export default defineConfig({
 
     footer: {
       message: 'Released under the Apache 2.0 License.',
-      copyright: 'Copyright 2024 17Artist'
+      copyright: 'Copyright 2026 17Artist'
     },
 
     search: {

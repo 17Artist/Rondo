@@ -1,21 +1,21 @@
 package priv.seventeen.artist.rondo.config
 
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.blink.config.BlinkConfig
 import priv.seventeen.artist.blink.config.Comment
 import priv.seventeen.artist.blink.config.ConfigKey
-import priv.seventeen.artist.rondo.Rondo
 
 /**
  * 消息配置文件
  */
-class MessageConfig : BlinkConfig(Rondo.plugin, "messages") {
+class MessageConfig : BlinkConfig(bukkitPlugin, "messages") {
 
     @Comment("前缀")
     var prefix: String = "§7[§6§lR§7] "
 
     @Comment("余额查看")
     @ConfigKey("balance-header")
-    var balanceHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §6§l\u2726 §e§l我的钱包                  §8│"
+    var balanceHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §6§l✦ §e§l我的钱包                  §8│"
 
     @ConfigKey("balance-entry")
     var balanceEntry: String = "§8 │  {color}  {display_name}§8: §f{balance} {color}{symbol}§8  │"
@@ -51,13 +51,13 @@ class MessageConfig : BlinkConfig(Rondo.plugin, "messages") {
 
     @Comment("排行榜")
     @ConfigKey("ranking-header")
-    var rankingHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §e§l\u2606 §6§l{display_name} §e§l排行榜            §8│\n§8 ├─────────────────────────────┤"
+    var rankingHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §e§l☆ §6§l{display_name} §e§l排行榜            §8│\n§8 ├─────────────────────────────┤"
 
     @ConfigKey("ranking-entry")
     var rankingEntry: String = "§8 │  §e#{rank} §f{player} §8- {color}{symbol}{balance}§8  │"
 
     @ConfigKey("ranking-footer")
-    var rankingFooter: String = "§8 ├─────────────────────────────┤\n§8 │  §7第 §f{page}§7/{total_pages} 页 §8\u2502 §7我的排名 §e#{my_rank}§8  │\n§8 └─────────────────────────────┘"
+    var rankingFooter: String = "§8 ├─────────────────────────────┤\n§8 │  §7第 §f{page}§7/{total_pages} 页 §8│ §7我的排名 §e#{my_rank}§8  │\n§8 └─────────────────────────────┘"
 
     @Comment("管理员")
     @ConfigKey("admin-give")
@@ -70,7 +70,7 @@ class MessageConfig : BlinkConfig(Rondo.plugin, "messages") {
     var adminSet: String = "{prefix}§a\u2714 §f已将 §e{player} §f的 {color}{display_name} §f设为 {color}{symbol}{amount}"
 
     @ConfigKey("admin-check-header")
-    var adminCheckHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §6§l\u2726 §e{player} §7的钱包            §8│"
+    var adminCheckHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §6§l✦ §e{player} §7的钱包            §8│"
 
     @Comment("通用错误")
     @ConfigKey("error-currency-not-found")
@@ -90,14 +90,20 @@ class MessageConfig : BlinkConfig(Rondo.plugin, "messages") {
 
     @Comment("流水日志")
     @ConfigKey("log-header")
-    var logHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §e§l\u2630 §6§l交易记录                  §8│\n§8 ├─────────────────────────────┤"
+    var logHeader: String = "\n§8 ┌─────────────────────────────┐\n§8 │  §e§l☰ §6§l交易记录                  §8│\n§8 ├─────────────────────────────┤"
 
     @ConfigKey("log-entry")
-    var logEntry: String = "§8 │  §7{time} {action}{color}{symbol}{amount} §8\u2502 §7{source}§8  │"
+    var logEntry: String = "§8 │  §7{time} {action}{color}{symbol}{amount} §8│ §7{source}§8  │"
 
     @ConfigKey("log-footer")
     var logFooter: String = "§8 └─────────────────────────────┘"
 
     @ConfigKey("log-empty")
     var logEmpty: String = "{prefix}§7暂无交易记录"
+
+    companion object {
+        lateinit var instance: MessageConfig private set
+        fun load() { instance = MessageConfig(); instance.load() }
+        fun reload() = instance.reload()
+    }
 }

@@ -1,7 +1,7 @@
 package priv.seventeen.artist.rondo.log
 
 import priv.seventeen.artist.blink.BlinkLog
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.config.MainConfig
 import priv.seventeen.artist.rondo.storage.StorageManager
 import org.bukkit.scheduler.BukkitRunnable
@@ -31,7 +31,7 @@ object LogManager {
             override fun run() {
                 flush()
             }
-        }.runTaskTimerAsynchronously(Rondo.plugin, 100L, 100L)
+        }.runTaskTimerAsynchronously(bukkitPlugin, 100L, 100L)
 
         // 定时清理过期日志
         val retentionDays = config.features.logRetentionDays
@@ -40,7 +40,7 @@ object LogManager {
                 override fun run() {
                     StorageManager.provider.cleanExpiredLogs(retentionDays)
                 }
-            }.runTaskTimerAsynchronously(Rondo.plugin, 72000L, 72000L) // 每小时清理一次
+            }.runTaskTimerAsynchronously(bukkitPlugin, 72000L, 72000L) // 每小时清理一次
         }
     }
 

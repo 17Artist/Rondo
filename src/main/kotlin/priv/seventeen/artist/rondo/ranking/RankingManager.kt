@@ -3,7 +3,7 @@ package priv.seventeen.artist.rondo.ranking
 import org.bukkit.Bukkit
 import org.bukkit.scheduler.BukkitRunnable
 import priv.seventeen.artist.blink.BlinkLog
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.config.MainConfig
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
 import priv.seventeen.artist.rondo.storage.StorageManager
@@ -30,7 +30,7 @@ object RankingManager {
             override fun run() {
                 refreshAll()
             }
-        }.runTaskTimerAsynchronously(Rondo.plugin, 100L, refreshInterval)
+        }.runTaskTimerAsynchronously(bukkitPlugin, 100L, refreshInterval)
     }
 
     /** 获取排行榜 */

@@ -1,15 +1,15 @@
 package priv.seventeen.artist.rondo.config
 
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.blink.config.BlinkConfig
 import priv.seventeen.artist.blink.config.BlinkSection
 import priv.seventeen.artist.blink.config.Comment
 import priv.seventeen.artist.blink.config.ConfigKey
-import priv.seventeen.artist.rondo.Rondo
 
 /**
  * 主配置文件
  */
-class MainConfig : BlinkConfig(Rondo.plugin, "config") {
+class MainConfig : BlinkConfig(bukkitPlugin, "config") {
 
     @Comment("数据库配置")
     var storage: StorageSection = StorageSection()
@@ -19,6 +19,12 @@ class MainConfig : BlinkConfig(Rondo.plugin, "config") {
 
     @Comment("功能开关")
     var features: FeaturesSection = FeaturesSection()
+
+    companion object {
+        lateinit var instance: MainConfig private set
+        fun load() { instance = MainConfig(); instance.load() }
+        fun reload() = instance.reload()
+    }
 }
 
 class StorageSection : BlinkSection() {

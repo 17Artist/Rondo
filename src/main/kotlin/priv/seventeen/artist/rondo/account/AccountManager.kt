@@ -2,7 +2,7 @@ package priv.seventeen.artist.rondo.account
 
 import org.bukkit.scheduler.BukkitRunnable
 import priv.seventeen.artist.blink.BlinkLog
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.config.MainConfig
 import priv.seventeen.artist.rondo.storage.BalanceData
 import priv.seventeen.artist.rondo.storage.BalanceEntry
@@ -26,7 +26,7 @@ object AccountManager {
             override fun run() {
                 saveAll()
             }
-        }.runTaskTimerAsynchronously(Rondo.plugin, config.performance.saveInterval.toLong(), config.performance.saveInterval.toLong())
+        }.runTaskTimerAsynchronously(bukkitPlugin, config.performance.saveInterval.toLong(), config.performance.saveInterval.toLong())
     }
 
     /** 获取在线玩家账户 */
@@ -62,9 +62,9 @@ object AccountManager {
                         }
                         loading.remove(playerUuid)
                     }
-                }.runTask(Rondo.plugin)
+                }.runTask(bukkitPlugin)
             }
-        }.runTaskAsynchronously(Rondo.plugin)
+        }.runTaskAsynchronously(bukkitPlugin)
     }
 
     /** 玩家下线保存并卸载 */
@@ -76,7 +76,7 @@ object AccountManager {
                 override fun run() {
                     saveAccount(playerUuid, account)
                 }
-            }.runTaskAsynchronously(Rondo.plugin)
+            }.runTaskAsynchronously(bukkitPlugin)
         }
     }
 

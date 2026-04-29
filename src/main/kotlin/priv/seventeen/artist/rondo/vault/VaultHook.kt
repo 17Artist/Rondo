@@ -7,7 +7,7 @@ import org.bukkit.Bukkit
 import org.bukkit.OfflinePlayer
 import org.bukkit.plugin.ServicePriority
 import priv.seventeen.artist.blink.BlinkLog
-import priv.seventeen.artist.rondo.Rondo
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.currency.Currency
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
@@ -38,7 +38,7 @@ object VaultHook {
         Bukkit.getServicesManager().register(
             Economy::class.java,
             economy,
-            Rondo.plugin,
+            bukkitPlugin,
             ServicePriority.Highest
         )
         registered = true

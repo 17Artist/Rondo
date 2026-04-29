@@ -24,70 +24,55 @@ import priv.seventeen.artist.rondo.vault.VaultHook
  */
 object RondoLifecycle {
 
-    private lateinit var mainConfig: MainConfig
-    private lateinit var messageConfig: MessageConfig
-
     @Awake(LifeCycle.ENABLE, priority = 0)
     fun onEnable() {
-        BlinkLog.info("§6Rondo §7- Universal Multi-Currency Economy System")
-        BlinkLog.info("§7Initializing...")
-
         // 加载配置
-        mainConfig = MainConfig()
-        mainConfig.load()
-
-        messageConfig = MessageConfig()
-        messageConfig.load()
+        MainConfig.load()
+        MessageConfig.load()
 
         // 加载货币
         CurrencyRegistry.loadAll()
 
         // 初始化存储
-        StorageManager.initialize(mainConfig)
+        StorageManager.initialize(MainConfig.instance)
 
         // 初始化账户管理
-        AccountManager.initialize(mainConfig)
+        AccountManager.initialize(MainConfig.instance)
 
         // 初始化日志管理
-        LogManager.initialize(mainConfig)
+        LogManager.initialize(MainConfig.instance)
 
         // 初始化兑换系统
         ExchangeManager.initialize()
 
         // 初始化排行榜
-        RankingManager.initialize(mainConfig)
+        RankingManager.initialize(MainConfig.instance)
 
         // 注册命令
-        MoneyCommand.register(messageConfig)
-        AdminCommand.register(messageConfig, mainConfig)
+        MoneyCommand.register()
+        AdminCommand.register()
 
         // 对接 Vault
-        if (mainConfig.features.vaultHook) {
+        if (MainConfig.instance.features.vaultHook) {
             VaultHook.hook()
         }
 
         // 对接 PlaceholderAPI
-        if (mainConfig.features.papiHook) {
+        if (MainConfig.instance.features.papiHook) {
             PAPIHook.hook()
         }
 
-        BlinkLog.info("§aRondo enabled! §7(${CurrencyRegistry.getAll().size} currencies loaded)")
+        BlinkLog.success("Rondo 已启用 §7(${CurrencyRegistry.getAll().size} 个货币)")
     }
 
     @Awake(LifeCycle.DISABLE, priority = 0)
     fun onDisable() {
-        BlinkLog.info("§7Shutting down Rondo...")
-
-        // 保存所有数据
         LogManager.shutdown()
         AccountManager.shutdown()
         StorageManager.shutdown()
-
-        // 注销集成
         VaultHook.unhook()
         PAPIHook.unhook()
-
-        BlinkLog.info("§cRondo disabled.")
+        BlinkLog.info("Rondo 已卸载")
     }
 
     @AutoListener
