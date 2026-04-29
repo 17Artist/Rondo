@@ -30,7 +30,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("priv.seventeen.artist.blink:blink-common:1.1.0")
+    implementation("priv.seventeen.artist.blink:blink-common:1.1.0")
     compileOnly("org.spigotmc:spigot-api:1.18.2-R0.1-SNAPSHOT")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1")
     compileOnly("me.clip:placeholderapi:2.11.6")
@@ -40,6 +40,10 @@ dependencies {
 
 kotlin {
     jvmToolchain(17)
+}
+
+tasks.shadowJar {
+    archiveClassifier.set("")
 }
 
 tasks.named("build") {
