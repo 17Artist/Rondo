@@ -20,7 +20,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
     override fun initialize() {
         val mysql = config.storage.mysql
         val hikariConfig = HikariConfig().apply {
-            jdbcUrl = "jdbc:mysql://${mysql.host}:${mysql.port}/${mysql.database}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8mb4"
+            jdbcUrl = "jdbc:mysql://${mysql.host}:${mysql.port}/${mysql.database}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&useUnicode=true"
             username = mysql.username
             password = mysql.password
             maximumPoolSize = mysql.poolSize
