@@ -12,12 +12,22 @@ object StorageManager {
         private set
 
     fun initialize(config: MainConfig) {
-        provider = when (config.storage.type.lowercase()) {
-            "mysql" -> MySQLProvider(config)
-            else -> SQLiteProvider()
+        val type = config.storage.type.lowercase()
+        if (type == "mysql") {
+            try {
+                val mysql = MySQLProvider(config)
+                mysql.initialize()
+                provider = mysql
+                BlinkLog.success("MySQL 已连接")
+                return
+            } catch (e: Exception) {
+                BlinkLog.warn("MySQL 连接失败，回退到 SQLite: ${e.message}")
+            }
         }
-        provider.initialize()
-        BlinkLog.info("Storage type: ${config.storage.type}")
+        val sqlite = SQLiteProvider()
+        sqlite.initialize()
+        provider = sqlite
+        BlinkLog.info("存储类型: SQLite")
     }
 
     fun shutdown() {
