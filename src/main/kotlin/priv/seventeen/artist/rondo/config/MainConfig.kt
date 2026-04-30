@@ -20,6 +20,10 @@ class MainConfig : BlinkConfig(bukkitPlugin, "config") {
     @Comment("功能开关")
     var features: FeaturesSection = FeaturesSection()
 
+    @Comment("跨服同步 (Redis)")
+    @ConfigKey("cross-server")
+    var crossServer: CrossServerSection = CrossServerSection()
+
     companion object {
         lateinit var instance: MainConfig private set
         fun load() { instance = MainConfig(); instance.load() }
@@ -81,4 +85,31 @@ class FeaturesSection : BlinkSection() {
     @ConfigKey("log-retention-days")
     @Comment("日志保留天数 (-1=永久)")
     var logRetentionDays: Int = 30
+}
+
+class CrossServerSection : BlinkSection() {
+    @Comment("是否启用跨服同步")
+    var enabled: Boolean = false
+
+    @Comment("Redis 配置")
+    var redis: RedisSection = RedisSection()
+
+    @ConfigKey("mysql-backup")
+    @Comment("是否异步备份到 MySQL (跨服模式下)")
+    var mysqlBackup: Boolean = true
+
+    @ConfigKey("sync-channel")
+    @Comment("Pub/Sub 通道名")
+    var syncChannel: String = "rondo:sync"
+}
+
+class RedisSection : BlinkSection() {
+    var host: String = "localhost"
+    var port: Int = 6379
+    var password: String = ""
+    var database: Int = 0
+
+    @ConfigKey("pool-size")
+    @Comment("连接池大小")
+    var poolSize: Int = 8
 }

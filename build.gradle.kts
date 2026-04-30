@@ -18,7 +18,8 @@ blink {
     logPrefix.set("§6✦ §eRondo")
     libraries.set(listOf(
         "com.zaxxer:HikariCP:5.1.0",
-        "org.xerial:sqlite-jdbc:3.44.1.0"
+        "org.xerial:sqlite-jdbc:3.44.1.0",
+        "redis.clients:jedis:5.1.0"
     ))
 }
 
@@ -37,6 +38,7 @@ dependencies {
     compileOnly("me.clip:placeholderapi:2.11.6")
     compileOnly("com.zaxxer:HikariCP:5.1.0")
     compileOnly("org.xerial:sqlite-jdbc:3.44.1.0")
+    compileOnly("redis.clients:jedis:5.1.0")
 }
 
 kotlin {

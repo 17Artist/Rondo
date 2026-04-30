@@ -16,6 +16,7 @@ import priv.seventeen.artist.rondo.exchange.ExchangeManager
 import priv.seventeen.artist.rondo.log.LogManager
 import priv.seventeen.artist.rondo.placeholder.PAPIHook
 import priv.seventeen.artist.rondo.ranking.RankingManager
+import priv.seventeen.artist.rondo.redis.RedisManager
 import priv.seventeen.artist.rondo.storage.StorageManager
 import priv.seventeen.artist.rondo.vault.VaultHook
 
@@ -35,6 +36,15 @@ object RondoLifecycle {
 
         // 初始化存储
         StorageManager.initialize(MainConfig.instance)
+
+        // 跨服模式：初始化 Redis
+        if (MainConfig.instance.crossServer.enabled) {
+            try {
+                RedisManager.initialize(MainConfig.instance)
+            } catch (e: Exception) {
+                BlinkLog.error("Redis 初始化失败，跨服同步已禁用", e)
+            }
+        }
 
         // 初始化账户管理
         AccountManager.initialize(MainConfig.instance)
@@ -62,13 +72,15 @@ object RondoLifecycle {
             PAPIHook.hook()
         }
 
-        BlinkLog.success("Rondo 已启用 §7(${CurrencyRegistry.getAll().size} 个货币)")
+        val mode = if (MainConfig.instance.crossServer.enabled && RedisManager.isEnabled) "§b跨服" else "§7单服"
+        BlinkLog.success("Rondo 已启用 §7(${CurrencyRegistry.getAll().size} 个货币, $mode§7)")
     }
 
     @Awake(LifeCycle.DISABLE, priority = 0)
     fun onDisable() {
         LogManager.shutdown()
         AccountManager.shutdown()
+        RedisManager.shutdown()
         StorageManager.shutdown()
         VaultHook.unhook()
         PAPIHook.unhook()

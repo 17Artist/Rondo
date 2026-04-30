@@ -4,6 +4,9 @@ import org.bukkit.scheduler.BukkitRunnable
 import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.config.MainConfig
+import priv.seventeen.artist.rondo.currency.CurrencyRegistry
+import priv.seventeen.artist.rondo.redis.RedisEconomyProvider
+import priv.seventeen.artist.rondo.redis.RedisManager
 import priv.seventeen.artist.rondo.storage.BalanceData
 import priv.seventeen.artist.rondo.storage.BalanceEntry
 import priv.seventeen.artist.rondo.storage.StorageManager
@@ -13,47 +16,60 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 账户管理器 — 缓存 + 加载/卸载 + 离线操作
+ * 跨服模式下余额操作走 Redis 原子事务
  */
 object AccountManager {
 
     private val accounts = ConcurrentHashMap<UUID, Account>()
-    /** 正在加载中的玩家集合，防止竞态 */
     private val loading = ConcurrentHashMap.newKeySet<UUID>()
+    private var crossServer = false
 
     fun initialize(config: MainConfig) {
-        // 定时批量保存
-        object : BukkitRunnable() {
-            override fun run() {
-                saveAll()
+        crossServer = config.crossServer.enabled
+
+        // 单服模式：定时批量保存到数据库
+        if (!crossServer) {
+            object : BukkitRunnable() {
+                override fun run() { saveAll() }
+            }.runTaskTimerAsynchronously(bukkitPlugin, config.performance.saveInterval.toLong(), config.performance.saveInterval.toLong())
+        } else {
+            // 跨服模式：定时将 Redis 数据备份到 MySQL
+            if (config.crossServer.mysqlBackup) {
+                object : BukkitRunnable() {
+                    override fun run() { backupAllToDatabase() }
+                }.runTaskTimerAsynchronously(bukkitPlugin, 6000L, 6000L) // 5分钟
             }
-        }.runTaskTimerAsynchronously(bukkitPlugin, config.performance.saveInterval.toLong(), config.performance.saveInterval.toLong())
+        }
     }
 
     /** 获取在线玩家账户 */
     fun getAccount(playerUuid: UUID): Account? = accounts[playerUuid]
-
-    /** 获取或加载账户（在线优先，离线从数据库读） */
-    fun getOrLoadAccount(playerUuid: UUID): Account {
-        accounts[playerUuid]?.let { return it }
-        // 离线玩家临时加载
-        val account = Account(playerUuid)
-        val data = StorageManager.provider.loadBalances(playerUuid)
-        account.load(data)
-        return account
-    }
 
     /** 玩家上线加载 */
     fun loadPlayer(playerUuid: UUID) {
         loading.add(playerUuid)
         object : BukkitRunnable() {
             override fun run() {
-                val data = StorageManager.provider.loadBalances(playerUuid)
+                val data = if (crossServer) {
+                    // 跨服：从 Redis 加载，如果 Redis 没有则从数据库加载并同步到 Redis
+                    var redisData = RedisEconomyProvider.loadAllBalances(playerUuid)
+                    if (redisData.isEmpty()) {
+                        val dbData = StorageManager.provider.loadBalances(playerUuid)
+                        if (dbData.isNotEmpty()) {
+                            RedisEconomyProvider.syncFromDatabase(playerUuid, dbData)
+                        }
+                        dbData
+                    } else {
+                        redisData
+                    }
+                } else {
+                    StorageManager.provider.loadBalances(playerUuid)
+                }
+
                 object : BukkitRunnable() {
                     override fun run() {
-                        // 如果加载期间已有账户（被其他操作创建），合并而非覆盖
                         val existing = accounts[playerUuid]
                         if (existing != null && existing.dirty) {
-                            // 已有脏数据，以内存为准，仅补充缺失的货币
                             existing.mergeDefaults(data)
                         } else {
                             val account = Account(playerUuid)
@@ -71,20 +87,81 @@ object AccountManager {
     fun unloadPlayer(playerUuid: UUID) {
         loading.remove(playerUuid)
         val account = accounts.remove(playerUuid) ?: return
-        if (account.dirty) {
+        if (crossServer) {
+            // 跨服模式：备份到数据库
+            if (MainConfig.instance.crossServer.mysqlBackup) {
+                object : BukkitRunnable() {
+                    override fun run() { backupPlayerToDatabase(playerUuid) }
+                }.runTaskAsynchronously(bukkitPlugin)
+            }
+        } else if (account.dirty) {
             object : BukkitRunnable() {
-                override fun run() {
-                    saveAccount(playerUuid, account)
-                }
+                override fun run() { saveAccount(playerUuid, account) }
             }.runTaskAsynchronously(bukkitPlugin)
         }
     }
 
-    /** 保存所有脏数据 */
+    // ===== 余额操作 =====
+
+    /** 存入 */
+    fun depositOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
+        if (crossServer) {
+            val currency = CurrencyRegistry.get(currencyId) ?: return false
+            return RedisEconomyProvider.deposit(playerUuid, currencyId, amount, currency)
+        }
+        val online = accounts[playerUuid]
+        if (online != null) return online.deposit(currencyId, amount)
+        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount, source)
+    }
+
+    /** 扣除 */
+    fun withdrawOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
+        if (crossServer) {
+            val currency = CurrencyRegistry.get(currencyId)
+            val allowNegative = currency?.negativeAllowed ?: false
+            return RedisEconomyProvider.withdraw(playerUuid, currencyId, amount, allowNegative)
+        }
+        val online = accounts[playerUuid]
+        if (online != null) return online.withdraw(currencyId, amount)
+        val currency = CurrencyRegistry.get(currencyId)
+        val allowNegative = currency?.negativeAllowed ?: false
+        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount.negate(), source, allowNegative)
+    }
+
+    /** 设置余额 */
+    @Suppress("UNUSED_PARAMETER")
+    fun setBalanceOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
+        if (crossServer) {
+            return RedisEconomyProvider.setBalance(playerUuid, currencyId, amount)
+        }
+        val online = accounts[playerUuid]
+        if (online != null) return online.setBalance(currencyId, amount)
+        val existing = StorageManager.provider.getOfflineBalance(playerUuid, currencyId)
+        val data = BalanceData(
+            balance = amount,
+            totalEarned = existing?.totalEarned ?: BigDecimal.ZERO,
+            totalSpent = existing?.totalSpent ?: BigDecimal.ZERO
+        )
+        StorageManager.provider.saveBalance(playerUuid, currencyId, data)
+        return true
+    }
+
+    /** 获取余额 */
+    fun getBalance(playerUuid: UUID, currencyId: String): BigDecimal {
+        if (crossServer) {
+            return RedisEconomyProvider.getBalance(playerUuid, currencyId)
+        }
+        val online = accounts[playerUuid]
+        if (online != null) return online.getBalance(currencyId)
+        return StorageManager.provider.getOfflineBalance(playerUuid, currencyId)?.balance ?: BigDecimal.ZERO
+    }
+
+    // ===== 持久化 =====
+
+    /** 单服模式：保存所有脏数据到数据库 */
     fun saveAll() {
         val entries = mutableListOf<BalanceEntry>()
         for ((uuid, account) in accounts) {
-            // 使用 snapshot + markClean 原子操作，避免丢失脏标记
             val snapshot = account.snapshotAndClean()
             if (snapshot.isNotEmpty()) {
                 for ((currencyId, data) in snapshot) {
@@ -97,7 +174,6 @@ object AccountManager {
                 StorageManager.provider.saveBalancesBatch(entries)
             } catch (e: Exception) {
                 BlinkLog.warn("Failed to save balances: ${e.message}")
-                // 标记回脏，下次重试
                 for (entry in entries) {
                     accounts[entry.playerUuid]?.markDirty()
                 }
@@ -105,74 +181,47 @@ object AccountManager {
         }
     }
 
-    /** 保存单个账户 */
+    /** 单服模式：保存单个账户 */
     private fun saveAccount(playerUuid: UUID, account: Account) {
         for ((currencyId, data) in account.getAllBalances()) {
             StorageManager.provider.saveBalance(playerUuid, currencyId, data)
         }
     }
 
-    /** 离线操作：存入 */
-    fun depositOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
-        // 如果在线，走内存
-        val online = accounts[playerUuid]
-        if (online != null) {
-            return online.deposit(currencyId, amount)
+    /** 跨服模式：将所有在线玩家的 Redis 数据备份到 MySQL */
+    private fun backupAllToDatabase() {
+        for ((uuid, _) in accounts) {
+            try {
+                backupPlayerToDatabase(uuid)
+            } catch (e: Exception) {
+                BlinkLog.warn("Failed to backup $uuid to database: ${e.message}")
+            }
         }
-        // 离线走数据库
-        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount, source)
     }
 
-    /** 离线操作：扣除 */
-    fun withdrawOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
-        val online = accounts[playerUuid]
-        if (online != null) {
-            return online.withdraw(currencyId, amount)
+    /** 跨服模式：将单个玩家的 Redis 数据备份到 MySQL */
+    private fun backupPlayerToDatabase(playerUuid: UUID) {
+        val data = RedisEconomyProvider.backupToDatabase(playerUuid)
+        for ((currencyId, balanceData) in data) {
+            StorageManager.provider.saveBalance(playerUuid, currencyId, balanceData)
         }
-        val currency = priv.seventeen.artist.rondo.currency.CurrencyRegistry.get(currencyId)
-        val allowNegative = currency?.negativeAllowed ?: false
-        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount.negate(), source, allowNegative)
     }
 
-    /** 离线操作：设置余额 */
-    @Suppress("UNUSED_PARAMETER")
-    fun setBalanceOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
-        val online = accounts[playerUuid]
-        if (online != null) {
-            return online.setBalance(currencyId, amount)
-        }
-        // 离线：先读取现有数据保留统计字段，再更新余额
-        val existing = StorageManager.provider.getOfflineBalance(playerUuid, currencyId)
-        val data = BalanceData(
-            balance = amount,
-            totalEarned = existing?.totalEarned ?: BigDecimal.ZERO,
-            totalSpent = existing?.totalSpent ?: BigDecimal.ZERO
-        )
-        StorageManager.provider.saveBalance(playerUuid, currencyId, data)
-        return true
-    }
-
-    /** 获取余额（在线或离线） */
-    fun getBalance(playerUuid: UUID, currencyId: String): BigDecimal {
-        val online = accounts[playerUuid]
-        if (online != null) {
-            return online.getBalance(currencyId)
-        }
-        return StorageManager.provider.getOfflineBalance(playerUuid, currencyId)?.balance ?: BigDecimal.ZERO
-    }
-
-    /** 关闭时保存所有 */
+    /** 关闭 */
     fun shutdown() {
-        saveAll()
-        // 同步保存所有剩余
-        for ((uuid, account) in accounts) {
-            if (account.dirty) {
-                saveAccount(uuid, account)
+        if (crossServer) {
+            // 跨服模式：最终备份
+            if (MainConfig.instance.crossServer.mysqlBackup) {
+                backupAllToDatabase()
+            }
+        } else {
+            saveAll()
+            for ((uuid, account) in accounts) {
+                if (account.dirty) saveAccount(uuid, account)
             }
         }
         accounts.clear()
     }
 
-    /** 是否在线 */
     fun isOnline(playerUuid: UUID): Boolean = accounts.containsKey(playerUuid)
 }

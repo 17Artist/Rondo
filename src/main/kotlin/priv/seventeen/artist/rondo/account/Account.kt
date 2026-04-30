@@ -151,4 +151,9 @@ class Account(val playerUuid: UUID) {
     fun getDirtyEntries(): Map<String, BalanceData> {
         return if (dirty) balances.toMap() else emptyMap()
     }
+
+    /** 从 Redis 同步更新单个货币的缓存（跨服通知用） */
+    fun updateFromRedis(currencyId: String, data: BalanceData) {
+        balances[currencyId.lowercase()] = data
+    }
 }
