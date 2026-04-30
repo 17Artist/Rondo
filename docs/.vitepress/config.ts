@@ -39,6 +39,7 @@ export default defineConfig({
             { text: '主配置', link: '/guide/configuration' },
             { text: '货币配置', link: '/guide/currencies' },
             { text: '兑换规则', link: '/guide/exchange' },
+            { text: '跨服同步', link: '/guide/cross-server' },
             { text: '消息配置', link: '/guide/messages' }
           ]
         },

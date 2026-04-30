@@ -2,7 +2,7 @@
   <img src="docs/public/logo.svg" alt="Rondo" width="160">
   <h1>Rondo</h1>
   <p><strong>通用多经济系统 Minecraft 插件</strong></p>
-  <p>配置驱动 · 高性能 · 可扩展</p>
+  <p>配置驱动 · 高性能 · 跨服同步</p>
 
   ![Minecraft](https://img.shields.io/badge/Minecraft-1.18.2+-green?style=flat-square)
   ![Framework](https://img.shields.io/badge/Framework-Blink-orange?style=flat-square)
@@ -20,6 +20,7 @@ Rondo 是一个基于 [Blink](https://github.com/17Artist/Blink) 框架的通用
 
 - **无限货币类型** — YAML 配置驱动，支持小数精度、余额上限、转账税率等属性
 - **内置兑换系统** — 货币间兑换规则，支持比率设定、周期限购（日/周/月）
+- **Redis 跨服同步** — Lua 原子事务保证多服余额强一致性，Pub/Sub 实时通知
 - **排行榜系统** — 自动维护每种货币的排行榜，定时刷新
 - **完整流水日志** — 异步记录每笔交易，支持按货币、时间查询，自动清理过期日志
 - **Vault & PlaceholderAPI** — 无缝对接主流插件生态
@@ -33,15 +34,14 @@ Rondo 是一个基于 [Blink](https://github.com/17Artist/Blink) 框架的通用
 | Minecraft | 1.18.2+ |
 | 服务端 | Spigot / Paper |
 | Java | 17+ |
-| 前置 | [Blink](https://github.com/17Artist/Blink) 1.1.0+ |
+| 可选 | Redis（跨服同步） |
 
 ## 快速开始
 
-1. 安装 [Blink](https://github.com/17Artist/Blink) 框架
-2. 将 `Rondo-x.x.x.jar` 放入 `plugins/` 目录
-3. 启动服务器，自动生成配置文件
-4. 编辑 `plugins/Rondo/currencies/` 下的货币配置
-5. `/rondo reload` 重载
+1. 将 `Rondo-x.x.x.jar` 放入 `plugins/` 目录
+2. 启动服务器，自动生成配置文件
+3. 编辑 `plugins/Rondo/currencies/` 下的货币配置
+4. `/rondo reload` 重载
 
 ## 命令
 
@@ -66,27 +66,19 @@ Rondo 是一个基于 [Blink](https://github.com/17Artist/Blink) 框架的通用
 | `/rondo log <玩家> [货币] [页码]` | 查看流水 |
 | `/rondo reload` | 重载配置 |
 
-## 货币配置示例
+## 跨服同步
+
+启用 Redis 跨服模式后，所有余额操作通过 Redis Lua 原子事务完成，多服务端之间强一致：
 
 ```yaml
-# plugins/Rondo/currencies/gold.yml
-id: gold
-display-name: "金币"
-symbol: "G"
-color: "GOLD"
-description: "游戏内通用货币"
-
-decimal-places: 0
-max-balance: -1
-default-balance: 0
-negative-allowed: false
-
-tradeable: true
-transferable: true
-transfer-tax-rate: 0.05
-
-vault-primary: true
-ranking-enabled: true
+# config.yml
+cross-server:
+  enabled: true
+  redis:
+    host: localhost
+    port: 6379
+    password: ""
+  mysql-backup: true
 ```
 
 ## API
@@ -95,16 +87,9 @@ ranking-enabled: true
 import priv.seventeen.artist.rondo.api.RondoAPI
 import java.math.BigDecimal
 
-// 查询余额
 val balance = RondoAPI.getBalance(playerUuid, "gold")
-
-// 扣款
 val success = RondoAPI.withdraw(playerUuid, "gold", BigDecimal(100), "my_plugin:shop")
-
-// 存入
 RondoAPI.deposit(playerUuid, "gold", BigDecimal(50), "my_plugin:reward")
-
-// 转账
 val result = RondoAPI.transfer(fromUuid, toUuid, "gold", BigDecimal(200))
 ```
 
@@ -123,4 +108,3 @@ val result = RondoAPI.transfer(fromUuid, toUuid, "gold", BigDecimal(200))
 ## 许可证
 
 [Apache License 2.0](LICENSE)
-

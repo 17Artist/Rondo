@@ -2,12 +2,12 @@
 
 ## 环境要求
 
-| 项目        | 要求             |
-|-----------|----------------|
-| Minecraft | 1.18.2+        |
-| 服务端       | Spigot / Paper |
-| Java      | 17+            |
-| Blink     | 1.1.0+         |
+| 项目 | 要求 |
+|------|------|
+| Minecraft | 1.18.2+ |
+| 服务端 | Spigot / Paper |
+| Java | 17+ |
+| 可选 | Redis（跨服同步） |
 
 ## 安装
 
@@ -46,4 +46,5 @@ plugins/Rondo/
 
 - [主配置详解](/guide/configuration) — 数据库、性能参数
 - [货币配置](/guide/currencies) — 自定义你的货币体系
+- [跨服同步](/guide/cross-server) — Redis 多服同步
 - [命令参考](/guide/commands) — 所有可用命令
