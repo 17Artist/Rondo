@@ -1,6 +1,5 @@
 package priv.seventeen.artist.rondo.redis
 
-import org.bukkit.Bukkit
 import org.bukkit.scheduler.BukkitRunnable
 import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.account.AccountManager
@@ -10,17 +9,21 @@ import java.util.UUID
 /**
  * Redis Pub/Sub 消息接收器 — 收到其他服务端的余额变更通知后刷新本地缓存
  *
- * 消息格式: {uuid}:{currencyId}
+ * 消息格式: {serverId}:{uuid}:{currencyId}
  */
 class RedisSyncListener : JedisPubSub() {
 
     override fun onMessage(channel: String, message: String) {
         try {
-            val parts = message.split(":", limit = 2)
-            if (parts.size != 2) return
+            val parts = message.split(":", limit = 3)
+            if (parts.size != 3) return
 
-            val uuid = try { UUID.fromString(parts[0]) } catch (_: Exception) { return }
-            val currencyId = parts[1]
+            val serverId = parts[0]
+            // 忽略本服自己发的消息（本服已在 refreshLocalCache 中同步更新）
+            if (serverId == RedisManager.serverId) return
+
+            val uuid = try { UUID.fromString(parts[1]) } catch (_: Exception) { return }
+            val currencyId = parts[2]
 
             // 检查该玩家是否在本服在线
             val account = AccountManager.getAccount(uuid) ?: return

@@ -107,7 +107,9 @@ object AccountManager {
     fun depositOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
         if (crossServer) {
             val currency = CurrencyRegistry.get(currencyId) ?: return false
-            return RedisEconomyProvider.deposit(playerUuid, currencyId, amount, currency)
+            val success = RedisEconomyProvider.deposit(playerUuid, currencyId, amount, currency)
+            if (success) refreshLocalCache(playerUuid, currencyId)
+            return success
         }
         val online = accounts[playerUuid]
         if (online != null) return online.deposit(currencyId, amount)
@@ -119,7 +121,9 @@ object AccountManager {
         if (crossServer) {
             val currency = CurrencyRegistry.get(currencyId)
             val allowNegative = currency?.negativeAllowed ?: false
-            return RedisEconomyProvider.withdraw(playerUuid, currencyId, amount, allowNegative)
+            val success = RedisEconomyProvider.withdraw(playerUuid, currencyId, amount, allowNegative)
+            if (success) refreshLocalCache(playerUuid, currencyId)
+            return success
         }
         val online = accounts[playerUuid]
         if (online != null) return online.withdraw(currencyId, amount)
@@ -132,7 +136,9 @@ object AccountManager {
     @Suppress("UNUSED_PARAMETER")
     fun setBalanceOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
         if (crossServer) {
-            return RedisEconomyProvider.setBalance(playerUuid, currencyId, amount)
+            val success = RedisEconomyProvider.setBalance(playerUuid, currencyId, amount)
+            if (success) refreshLocalCache(playerUuid, currencyId)
+            return success
         }
         val online = accounts[playerUuid]
         if (online != null) return online.setBalance(currencyId, amount)
@@ -224,4 +230,11 @@ object AccountManager {
     }
 
     fun isOnline(playerUuid: UUID): Boolean = accounts.containsKey(playerUuid)
+
+    /** 跨服模式：Redis 写操作后立即刷新本服内存缓存 */
+    private fun refreshLocalCache(playerUuid: UUID, currencyId: String) {
+        val account = accounts[playerUuid] ?: return
+        val data = RedisEconomyProvider.getBalanceData(playerUuid, currencyId)
+        account.updateFromRedis(currencyId, data)
+    }
 }

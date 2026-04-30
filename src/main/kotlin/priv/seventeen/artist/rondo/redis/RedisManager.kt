@@ -5,6 +5,7 @@ import priv.seventeen.artist.rondo.config.MainConfig
 import redis.clients.jedis.JedisPool
 import redis.clients.jedis.JedisPoolConfig
 import redis.clients.jedis.JedisPubSub
+import java.util.UUID
 
 /**
  * Redis 连接池管理 + Pub/Sub
@@ -15,6 +16,9 @@ object RedisManager {
     private var subThread: Thread? = null
     private var pubSub: JedisPubSub? = null
     private var channel: String = "rondo:sync"
+
+    /** 本服务端唯一 ID，用于 Pub/Sub 消息过滤 */
+    val serverId: String = UUID.randomUUID().toString().substring(0, 8)
 
     val isEnabled get() = ::pool.isInitialized
 
@@ -38,7 +42,7 @@ object RedisManager {
         // 验证连接
         try {
             pool.resource.use { it.ping() }
-            BlinkLog.success("Redis 已连接 §7(${redis.host}:${redis.port})")
+            BlinkLog.success("Redis 已连接 §7(${redis.host}:${redis.port}, id=$serverId)")
         } catch (e: Exception) {
             BlinkLog.error("Redis 连接失败: ${e.message}")
             throw e
@@ -53,8 +57,9 @@ object RedisManager {
         return pool.resource.use(block)
     }
 
-    /** 发布消息 */
-    fun publish(message: String) {
+    /** 发布同步消息，格式: {serverId}:{uuid}:{currencyId} */
+    fun publishSync(playerUuid: UUID, currencyId: String) {
+        val message = "$serverId:$playerUuid:$currencyId"
         try {
             pool.resource.use { it.publish(channel, message) }
         } catch (e: Exception) {

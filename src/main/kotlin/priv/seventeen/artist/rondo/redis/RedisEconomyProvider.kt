@@ -10,14 +10,13 @@ import java.util.UUID
  */
 object RedisEconomyProvider {
 
-    // Redis key 前缀
     private const val KEY_BALANCE = "rondo:bal"
     private const val KEY_EARNED = "rondo:earned"
     private const val KEY_SPENT = "rondo:spent"
 
     // ===== Lua 脚本 =====
 
-    /** 存入: 校验上限 + 增加余额 + 累计 earned，原子完成 */
+    /** 存入: 校验上限 + 增加余额 + 累计 earned */
     private val DEPOSIT_LUA = """
         local bal = tonumber(redis.call('HGET', KEYS[1], ARGV[1]) or '0')
         local amt = tonumber(ARGV[2])
@@ -27,11 +26,10 @@ object RedisEconomyProvider {
         redis.call('HSET', KEYS[1], ARGV[1], string.format('%.4f', newBal))
         local earned = tonumber(redis.call('HGET', KEYS[2], ARGV[1]) or '0')
         redis.call('HSET', KEYS[2], ARGV[1], string.format('%.4f', earned + amt))
-        redis.call('PUBLISH', ARGV[4], ARGV[5])
         return 1
     """.trimIndent()
 
-    /** 扣除: 校验余额 + 减少余额 + 累计 spent，原子完成 */
+    /** 扣除: 校验余额 + 减少余额 + 累计 spent */
     private val WITHDRAW_LUA = """
         local bal = tonumber(redis.call('HGET', KEYS[1], ARGV[1]) or '0')
         local amt = tonumber(ARGV[2])
@@ -41,28 +39,12 @@ object RedisEconomyProvider {
         redis.call('HSET', KEYS[1], ARGV[1], string.format('%.4f', newBal))
         local spent = tonumber(redis.call('HGET', KEYS[2], ARGV[1]) or '0')
         redis.call('HSET', KEYS[2], ARGV[1], string.format('%.4f', spent + amt))
-        redis.call('PUBLISH', ARGV[3 + (allowNeg and 0 or 0)], ARGV[4 + (allowNeg and 0 or 0)])
-        return 1
-    """.trimIndent()
-
-    // 简化版 — 参数位置固定
-    private val WITHDRAW_SCRIPT = """
-        local bal = tonumber(redis.call('HGET', KEYS[1], ARGV[1]) or '0')
-        local amt = tonumber(ARGV[2])
-        local allowNeg = ARGV[3] == '1'
-        if not allowNeg and bal - amt < 0 then return 0 end
-        local newBal = bal - amt
-        redis.call('HSET', KEYS[1], ARGV[1], string.format('%.4f', newBal))
-        local spent = tonumber(redis.call('HGET', KEYS[2], ARGV[1]) or '0')
-        redis.call('HSET', KEYS[2], ARGV[1], string.format('%.4f', spent + amt))
-        redis.call('PUBLISH', ARGV[4], ARGV[5])
         return 1
     """.trimIndent()
 
     /** 设置余额: 直接覆盖 */
     private val SET_LUA = """
         redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
-        redis.call('PUBLISH', ARGV[3], ARGV[4])
         return 1
     """.trimIndent()
 
@@ -72,51 +54,51 @@ object RedisEconomyProvider {
     fun deposit(playerUuid: UUID, currencyId: String, amount: BigDecimal, currency: Currency): Boolean {
         val key = "$KEY_BALANCE:$playerUuid"
         val earnedKey = "$KEY_EARNED:$playerUuid"
-        val channel = "rondo:sync"
-        val message = "$playerUuid:$currencyId"
         val maxBal = if (currency.hasMaxBalance) currency.maxBalance.toPlainString() else "-1"
 
         val result = RedisManager.use { jedis ->
             jedis.eval(
                 DEPOSIT_LUA,
                 listOf(key, earnedKey),
-                listOf(currencyId, amount.toPlainString(), maxBal, channel, message)
+                listOf(currencyId, amount.toPlainString(), maxBal)
             )
         }
-        return (result as Long) == 1L
+        val success = (result as Long) == 1L
+        if (success) RedisManager.publishSync(playerUuid, currencyId)
+        return success
     }
 
     /** 扣除货币（原子操作） */
     fun withdraw(playerUuid: UUID, currencyId: String, amount: BigDecimal, allowNegative: Boolean): Boolean {
         val key = "$KEY_BALANCE:$playerUuid"
         val spentKey = "$KEY_SPENT:$playerUuid"
-        val channel = "rondo:sync"
-        val message = "$playerUuid:$currencyId"
 
         val result = RedisManager.use { jedis ->
             jedis.eval(
-                WITHDRAW_SCRIPT,
+                WITHDRAW_LUA,
                 listOf(key, spentKey),
-                listOf(currencyId, amount.toPlainString(), if (allowNegative) "1" else "0", channel, message)
+                listOf(currencyId, amount.toPlainString(), if (allowNegative) "1" else "0")
             )
         }
-        return (result as Long) == 1L
+        val success = (result as Long) == 1L
+        if (success) RedisManager.publishSync(playerUuid, currencyId)
+        return success
     }
 
     /** 设置余额 */
     fun setBalance(playerUuid: UUID, currencyId: String, amount: BigDecimal): Boolean {
         val key = "$KEY_BALANCE:$playerUuid"
-        val channel = "rondo:sync"
-        val message = "$playerUuid:$currencyId"
 
         val result = RedisManager.use { jedis ->
             jedis.eval(
                 SET_LUA,
                 listOf(key),
-                listOf(currencyId, amount.toPlainString(), channel, message)
+                listOf(currencyId, amount.toPlainString())
             )
         }
-        return (result as Long) == 1L
+        val success = (result as Long) == 1L
+        if (success) RedisManager.publishSync(playerUuid, currencyId)
+        return success
     }
 
     /** 获取余额 */
