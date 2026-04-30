@@ -39,6 +39,10 @@ object RondoLifecycle {
 
         // 跨服模式：初始化 Redis
         if (MainConfig.instance.crossServer.enabled) {
+            if (MainConfig.instance.storage.type.lowercase() != "mysql") {
+                BlinkLog.warn("跨服模式建议使用 MySQL 存储，当前为 ${MainConfig.instance.storage.type}")
+                BlinkLog.warn("流水日志和排行榜数据将无法跨服共享")
+            }
             try {
                 RedisManager.initialize(MainConfig.instance)
             } catch (e: Exception) {

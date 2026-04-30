@@ -54,7 +54,7 @@ Rondo 会自动创建所需的表结构。
 群组服（BungeeCord/Velocity）环境下启用跨服同步：
 
 1. 确保所有子服安装相同版本的 Rondo
-2. 所有子服配置同一个 MySQL（用于持久化备份）
+2. 所有子服 `storage.type` 设为 `mysql`，连接同一个数据库
 3. 所有子服配置同一个 Redis：
 
 ```yaml

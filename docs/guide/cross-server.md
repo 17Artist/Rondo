@@ -43,7 +43,9 @@ cross-server:
 跨服模式需要：
 - 所有子服安装相同版本的 Rondo
 - 所有子服连接同一个 Redis 实例
-- 建议同时配置 MySQL 作为持久化备份（`mysql-backup: true`）
+- **所有子服必须使用 MySQL 存储**（`storage.type: mysql`，连接同一个数据库）
+- 流水日志和排行榜通过共享 MySQL 实现跨服可见
+- 建议同时开启 `mysql-backup: true` 定期将 Redis 数据备份到 MySQL
 :::
 
 ## 数据流
