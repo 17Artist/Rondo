@@ -37,7 +37,7 @@ plugins/Rondo/
 ## 快速验证
 
 ```
-/money                    # 查看自己的余额
+/money bal                # 查看自己的余额
 /rondo give Steve dark_coin 1000  # 给玩家发放货币
 /money top dark_coin      # 查看排行榜
 ```

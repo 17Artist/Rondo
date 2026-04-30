@@ -27,7 +27,7 @@ object MoneyCommand {
     fun register() {
 
         val cmd = BlinkCommand("money")
-            .command("", "查看所有货币余额", sender = SenderType.PLAYER) { ctx ->
+            .command("bal", "查看所有货币余额", permission = "rondo.use", sender = SenderType.PLAYER) { ctx ->
                 showAllBalances(ctx)
             }
             .command("help", "查看帮助", sender = SenderType.ALL) { ctx ->
@@ -281,7 +281,7 @@ object MoneyCommand {
         ctx.reply("§8 ┌─────────────────────────────┐")
         ctx.reply("§8 │  §6§l✦ §e§lRondo §7帮助                §8│")
         ctx.reply("§8 ├─────────────────────────────┤")
-        ctx.reply("§8 │  §e/money §8.............. §7查看余额§8  │")
+        ctx.reply("§8 │  §e/money bal §8.......... §7查看余额§8  │")
         ctx.reply("§8 │  §e/money pay §8.......... §7转账§8    │")
         ctx.reply("§8 │  §e/money exchange §8..... §7兑换§8    │")
         ctx.reply("§8 │  §e/money log §8.......... §7流水§8    │")

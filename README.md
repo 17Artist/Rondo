@@ -49,7 +49,7 @@ Rondo 是一个基于 [Blink](https://github.com/17Artist/Blink) 框架的通用
 
 | 命令 | 说明 |
 |------|------|
-| `/money` | 查看所有货币余额 |
+| `/money bal` | 查看所有货币余额 |
 | `/money pay <玩家> <货币> <数量>` | 转账 |
 | `/money exchange <源> <目标> <数量>` | 兑换 |
 | `/money log [货币] [页码]` | 查看交易记录 |
