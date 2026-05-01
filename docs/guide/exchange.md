@@ -9,15 +9,15 @@
 ```yaml
 exchanges:
   # 规则 ID（唯一标识）
-  star_yuan_to_protocol_ticket:
+  points_to_gold:
     # 源货币
-    from: star_yuan
+    from: points
     # 目标货币
-    to: protocol_ticket
-    # 兑换比率（源:目标 = rate:1）
-    rate: 160
+    to: gold
+    # 兑换比率（消耗 rate 个源货币 = 1 个目标货币）
+    rate: 0.01
     # 最小兑换数量（目标货币）
-    min-amount: 1
+    min-amount: 100
     # 周期内最大兑换数量（-1=无限）
     max-per-period: -1
     # 限购周期: NONE / DAILY / WEEKLY / MONTHLY
@@ -32,17 +32,17 @@ exchanges:
 
 兑换比率，表示获得 1 单位目标货币需要消耗多少源货币。
 
-例如 `rate: 160` 表示 160 源货币 = 1 目标货币。
+例如 `rate: 0.01` 表示 1 点券 = 100 金币（消耗 0.01 点券获得 1 金币）。
 
 ### max-per-period & period
 
 限购机制。`max-per-period` 是周期内允许兑换的最大目标货币数量。
 
-| period  | 说明       |
-|---------|----------|
-| NONE    | 无限制      |
-| DAILY   | 每日重置（0点） |
-| WEEKLY  | 每周重置（周一） |
+| period | 说明 |
+|--------|------|
+| NONE | 无限制 |
+| DAILY | 每日重置（0点） |
+| WEEKLY | 每周重置（周一） |
 | MONTHLY | 每月重置（1号） |
 
 ## 使用方式
@@ -54,8 +54,8 @@ exchanges:
 
 示例：
 ```
-/money exchange star_yuan protocol_ticket 5
-# 消耗 800 星元，获得 5 张协议凭证
+/money exchange honor gold 500
+# 消耗 50 荣誉点，获得 500 金币
 ```
 
 ## API 调用
@@ -63,7 +63,7 @@ exchanges:
 其他插件可通过 API 触发兑换：
 
 ```kotlin
-val result = RondoAPI.exchange(playerUuid, "star_yuan_to_protocol_ticket", BigDecimal(5))
+val result = RondoAPI.exchange(playerUuid, "honor_to_gold", BigDecimal(500))
 if (result.success) {
     // 兑换成功
 }

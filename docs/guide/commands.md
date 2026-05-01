@@ -20,15 +20,15 @@
 ### 转账示例
 
 ```
-/money pay Steve dark_coin 500
+/money pay Steve gold 500
 ```
 
-转账时会自动扣除税费。例如暗币税率 5%，转账 500 实际扣除 525。
+转账时会自动扣除税费。例如金币税率 5%，转账 500 实际扣除 525。
 
 ### 兑换示例
 
 ```
-/money exchange star_yuan protocol_ticket 3
+/money exchange points gold 500
 ```
 
 按配置的兑换比率执行，消耗源货币获得目标货币。
@@ -53,7 +53,7 @@
 所有管理员命令均支持对离线玩家操作：
 
 ```
-/rondo give OfflinePlayer star_yuan 1000
+/rondo give OfflinePlayer points 1000
 ```
 
 ::: tip

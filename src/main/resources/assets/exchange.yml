@@ -3,32 +3,22 @@
 # ===================================
 
 exchanges:
-  # 星元 -> 协议凭证 (160:1)
-  star_yuan_to_protocol_ticket:
-    from: star_yuan
-    to: protocol_ticket
-    rate: 160
-    min-amount: 1
+  # 点券 -> 金币 (1:100)
+  points_to_gold:
+    from: points
+    to: gold
+    rate: 0.01
+    min-amount: 100
     max-per-period: -1
     period: NONE
     enabled: true
 
-  # 星尘 -> 协议凭证 (75:1, 每月限5)
-  star_dust_to_protocol_ticket:
-    from: star_dust
-    to: protocol_ticket
-    rate: 75
-    min-amount: 1
-    max-per-period: 5
-    period: MONTHLY
-    enabled: true
-
-  # 星辉 -> 协议凭证 (10:1)
-  star_glory_to_protocol_ticket:
-    from: star_glory
-    to: protocol_ticket
-    rate: 10
-    min-amount: 1
-    max-per-period: -1
-    period: NONE
+  # 荣誉点 -> 金币 (1:10)
+  honor_to_gold:
+    from: honor
+    to: gold
+    rate: 0.1
+    min-amount: 10
+    max-per-period: 1000
+    period: DAILY
     enabled: true

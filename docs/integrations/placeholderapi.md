@@ -11,40 +11,40 @@ Rondo 提供丰富的 PlaceholderAPI 占位符，可用于计分板、Tab 列表
 
 ### 余额
 
-| 占位符                              | 说明    | 示例输出      |
-|----------------------------------|-------|-----------|
-| `%rondo_balance_<ID>%`           | 余额数字  | `1500`    |
-| `%rondo_balance_formatted_<ID>%` | 格式化余额 | `§6◆1500` |
+| 占位符 | 说明 | 示例输出 |
+|--------|------|----------|
+| `%rondo_balance_<ID>%` | 余额数字 | `1500` |
+| `%rondo_balance_formatted_<ID>%` | 格式化余额 | `§6G1500.00` |
 
 ### 统计
 
-| 占位符                         | 说明   | 示例输出    |
-|-----------------------------|------|---------|
+| 占位符 | 说明 | 示例输出 |
+|--------|------|----------|
 | `%rondo_total_earned_<ID>%` | 累计获得 | `25000` |
-| `%rondo_total_spent_<ID>%`  | 累计消耗 | `18000` |
+| `%rondo_total_spent_<ID>%` | 累计消耗 | `18000` |
 
 ### 排行榜
 
-| 占位符                             | 说明     | 示例输出    |
-|---------------------------------|--------|---------|
-| `%rondo_top_<ID>_<排名>_name%`    | 第N名玩家名 | `Steve` |
-| `%rondo_top_<ID>_<排名>_balance%` | 第N名余额  | `99999` |
-| `%rondo_rank_<ID>%`             | 自己的排名  | `5`     |
+| 占位符 | 说明 | 示例输出 |
+|--------|------|----------|
+| `%rondo_top_<ID>_<排名>_name%` | 第N名玩家名 | `Steve` |
+| `%rondo_top_<ID>_<排名>_balance%` | 第N名余额 | `99999` |
+| `%rondo_rank_<ID>%` | 自己的排名 | `5` |
 
 ### 示例
 
 ```
-# 显示暗币余额
-%rondo_balance_dark_coin%
+# 显示金币余额
+%rondo_balance_gold%
 
-# 显示格式化的星元余额
-%rondo_balance_formatted_star_yuan%
+# 显示格式化的点券余额
+%rondo_balance_formatted_points%
 
-# 暗币排行榜第1名
-%rondo_top_dark_coin_1_name%: %rondo_top_dark_coin_1_balance%
+# 金币排行榜第1名
+%rondo_top_gold_1_name%: %rondo_top_gold_1_balance%
 
-# 自己的暗币排名
-%rondo_rank_dark_coin%
+# 自己的金币排名
+%rondo_rank_gold%
 ```
 
 ## 计分板示例
@@ -52,9 +52,9 @@ Rondo 提供丰富的 PlaceholderAPI 占位符，可用于计分板、Tab 列表
 ```yaml
 # 使用 TAB 或其他计分板插件
 lines:
-  - "&6◆ 暗币: &f%rondo_balance_dark_coin%"
-  - "&a◇ 锂核: &f%rondo_balance_lithium%"
-  - "&b★ 星元: &f%rondo_balance_star_yuan%"
+  - "&6G 金币: &f%rondo_balance_gold%"
+  - "&bP 点券: &f%rondo_balance_points%"
+  - "&dH 荣誉: &f%rondo_balance_honor%"
   - ""
-  - "&e排名: #%rondo_rank_dark_coin%"
+  - "&e排名: #%rondo_rank_gold%"
 ```

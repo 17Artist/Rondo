@@ -66,6 +66,29 @@ Rondo 是一个基于 [Blink](https://github.com/17Artist/Blink) 框架的通用
 | `/rondo log <玩家> [货币] [页码]` | 查看流水 |
 | `/rondo reload` | 重载配置 |
 
+## 货币配置示例
+
+```yaml
+# plugins/Rondo/currencies/gold.yml
+id: gold
+display-name: "金币"
+symbol: "G"
+color: "GOLD"
+description: "游戏内主要流通货币"
+
+decimal-places: 2
+max-balance: -1
+default-balance: 0
+negative-allowed: false
+
+tradeable: true
+transferable: true
+transfer-tax-rate: 0.05
+
+vault-primary: true
+ranking-enabled: true
+```
+
 ## 跨服同步
 
 启用 Redis 跨服模式后，所有余额操作通过 Redis Lua 原子事务完成，多服务端之间强一致：

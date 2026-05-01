@@ -1,25 +1,22 @@
 # ===================================
-# Rondo - 协议凭证 (Protocol Ticket)
-# 抽卡凭证
+# Rondo - 荣誉点 (Honor)
+# 活动 / 成就奖励货币
 # ===================================
 
-id: protocol_ticket
-display-name: "协议凭证"
-symbol: "✦"
+id: honor
+display-name: "荣誉点"
+symbol: "H"
 color: "LIGHT_PURPLE"
-description: "征召系统抽卡凭证"
+description: "通过活动和成就获取的奖励货币"
 
-# 精度与上限
 decimal-places: 0
 max-balance: -1
 default-balance: 0
 negative-allowed: false
 
-# 行为
 tradeable: false
-transferable: false
+transferable: true
 transfer-tax-rate: 0.0
 
-# 集成
 vault-primary: false
-ranking-enabled: false
+ranking-enabled: true

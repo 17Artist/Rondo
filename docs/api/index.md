@@ -39,16 +39,16 @@ import priv.seventeen.artist.rondo.api.RondoAPI
 import java.math.BigDecimal
 
 // 查询余额
-val balance = RondoAPI.getBalance(player.uniqueId, "dark_coin")
+val balance = RondoAPI.getBalance(player.uniqueId, "gold")
 
 // 扣款
-val success = RondoAPI.withdraw(player.uniqueId, "dark_coin", BigDecimal(100), "my_plugin:shop")
+val success = RondoAPI.withdraw(player.uniqueId, "gold", BigDecimal(100), "my_plugin:shop")
 
 // 存入
-RondoAPI.deposit(player.uniqueId, "dark_coin", BigDecimal(50), "my_plugin:reward")
+RondoAPI.deposit(player.uniqueId, "gold", BigDecimal(50), "my_plugin:reward")
 
 // 转账
-val result = RondoAPI.transfer(from.uniqueId, to.uniqueId, "dark_coin", BigDecimal(200))
+val result = RondoAPI.transfer(from.uniqueId, to.uniqueId, "gold", BigDecimal(200))
 if (result.success) {
     // 转账成功，税额: result.taxAmount
 }

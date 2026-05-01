@@ -26,20 +26,17 @@ plugins/Rondo/
 ├── messages.yml            # 消息配置
 ├── exchange.yml            # 兑换规则
 └── currencies/             # 货币配置目录
-    ├── dark_coin.yml       # 暗币
-    ├── lithium.yml         # 锂核
-    ├── star_yuan.yml       # 星元
-    ├── protocol_ticket.yml # 协议凭证
-    ├── star_dust.yml       # 星尘
-    └── star_glory.yml      # 星辉
+    ├── gold.yml            # 金币（主货币）
+    ├── points.yml          # 点券（充值货币）
+    └── honor.yml           # 荣誉点（活动货币）
 ```
 
 ## 快速验证
 
 ```
-/money bal                # 查看自己的余额
-/rondo give Steve dark_coin 1000  # 给玩家发放货币
-/money top dark_coin      # 查看排行榜
+/money bal                           # 查看自己的余额
+/rondo give Steve gold 1000          # 给玩家发放金币
+/money top gold                      # 查看金币排行榜
 ```
 
 ## 下一步

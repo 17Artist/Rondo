@@ -88,8 +88,7 @@ class CurrencyConfig(plugin: JavaPlugin, path: String) : BlinkConfig(plugin, pat
 class CurrencyConfigs : BlinkConfigFolder<CurrencyConfig>(bukkitPlugin, "currencies") {
 
     private val defaults = listOf(
-        "dark_coin.yml", "lithium.yml", "star_yuan.yml",
-        "protocol_ticket.yml", "star_dust.yml", "star_glory.yml"
+        "gold.yml", "points.yml", "honor.yml"
     )
 
     override fun createConfig(plugin: JavaPlugin, filePath: String): CurrencyConfig {

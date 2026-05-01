@@ -1,25 +1,22 @@
 # ===================================
-# Rondo - 暗币 (Dark Coin)
-# 游戏内流通货币
+# Rondo - 金币 (Gold Coin)
+# 游戏内主要流通货币
 # ===================================
 
-id: dark_coin
-display-name: "暗币"
-symbol: "◆"
+id: gold
+display-name: "金币"
+symbol: "G"
 color: "GOLD"
-description: "游戏内流通货币，可自由交易"
+description: "游戏内主要流通货币"
 
-# 精度与上限
-decimal-places: 0
+decimal-places: 2
 max-balance: -1
 default-balance: 0
 negative-allowed: false
 
-# 行为
 tradeable: true
 transferable: true
 transfer-tax-rate: 0.05
 
-# 集成
 vault-primary: true
 ranking-enabled: true

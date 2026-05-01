@@ -9,7 +9,7 @@ Rondo 可以作为 Vault Economy Provider，让其他依赖 Vault 的插件使�
 3. 在某个货币配置中设置 `vault-primary: true`
 
 ```yaml
-# currencies/dark_coin.yml
+# currencies/gold.yml
 vault-primary: true
 ```
 
