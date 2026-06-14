@@ -1,6 +1,6 @@
 plugins {
     kotlin("jvm") version "1.8.22"
-    id("priv.seventeen.artist.blink") version "1.0.7"
+    id("priv.seventeen.artist.blink") version "1.3.1"
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
@@ -32,7 +32,7 @@ repositories {
 }
 
 dependencies {
-    implementation("priv.seventeen.artist.blink:blink-common:1.0.7")
+    implementation("priv.seventeen.artist.blink:blink-common:1.3.1")
     compileOnly("org.spigotmc:spigot-api:1.18.2-R0.1-SNAPSHOT")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1")
     compileOnly("me.clip:placeholderapi:2.11.6")
