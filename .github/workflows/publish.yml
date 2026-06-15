@@ -32,8 +32,8 @@ jobs:
       - name: Build
         run: ./gradlew clean build -Pversion=${{ steps.version.outputs.version }}
 
-      - name: Publish to Maven repository
-        env:
-          repo: ${{ secrets.MAVEN_REPO_PASSWORD }}
-          BUILD_NUMBER: ${{ github.run_number }}
-        run: ./gradlew deploy -Pversion=${{ steps.version.outputs.version }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rondo-${{ steps.version.outputs.version }}
+          path: build/libs/*-${{ steps.version.outputs.version }}.jar
