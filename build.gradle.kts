@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm") version "1.8.22"
     id("priv.seventeen.artist.blink") version "1.3.1"
     id("com.github.johnrengelman.shadow") version "8.1.1"
+    `maven-publish`
 }
 
 group = "priv.seventeen.artist"
@@ -51,4 +52,35 @@ tasks.shadowJar {
 
 tasks.named("build") {
     dependsOn("shadowJar")
+}
+
+val repoPassword: String = System.getenv("repo") ?: ""
+
+publishing {
+    publications {
+        create<MavenPublication>("shadow") {
+            artifact(tasks.shadowJar.get().archiveFile) {
+                classifier = null
+            }
+            artifactId = rootProject.name.lowercase()
+            val buildNumber = System.getenv("BUILD_NUMBER")
+            version = if (buildNumber != null) "${project.version}.$buildNumber" else project.version.toString()
+        }
+    }
+    repositories {
+        maven {
+            url = uri(project.findProperty("mavenRepoUrl") as? String ?: "")
+            isAllowInsecureProtocol = true
+            credentials {
+                username = project.findProperty("mavenRepoUser") as? String ?: ""
+                password = repoPassword
+            }
+        }
+    }
+}
+
+tasks.register("deploy") {
+    group = "publishing"
+    description = "Publish shadow jar to Maven repository"
+    dependsOn("publish")
 }
