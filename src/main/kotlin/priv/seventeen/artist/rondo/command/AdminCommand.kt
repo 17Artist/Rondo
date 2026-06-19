@@ -14,6 +14,7 @@ import priv.seventeen.artist.rondo.exchange.ExchangeManager
 import priv.seventeen.artist.rondo.log.TransactionLog
 import priv.seventeen.artist.rondo.ranking.RankingManager
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -92,7 +93,7 @@ object AdminCommand {
             return
         }
 
-        val amount = try { BigDecimal(amountStr) } catch (_: Exception) {
+        val amount = try { BigDecimal(amountStr).setScale(currency.decimalPlaces, RoundingMode.DOWN) } catch (_: Exception) {
             ctx.reply(messages.errorInvalidAmount.replace("{prefix}", messages.prefix))
             return
         }
@@ -132,7 +133,7 @@ object AdminCommand {
             return
         }
 
-        val amount = try { BigDecimal(amountStr) } catch (_: Exception) {
+        val amount = try { BigDecimal(amountStr).setScale(currency.decimalPlaces, RoundingMode.DOWN) } catch (_: Exception) {
             ctx.reply(messages.errorInvalidAmount.replace("{prefix}", messages.prefix))
             return
         }
@@ -172,7 +173,7 @@ object AdminCommand {
             return
         }
 
-        val amount = try { BigDecimal(amountStr) } catch (_: Exception) {
+        val amount = try { BigDecimal(amountStr).setScale(currency.decimalPlaces, RoundingMode.DOWN) } catch (_: Exception) {
             ctx.reply(messages.errorInvalidAmount.replace("{prefix}", messages.prefix))
             return
         }
@@ -213,7 +214,7 @@ object AdminCommand {
                 .replace("{color}", currency.color)
                 .replace("{symbol}", currency.symbol)
                 .replace("{display_name}", currency.displayName)
-                .replace("{balance}", balance.setScale(currency.decimalPlaces).toPlainString()))
+                .replace("{balance}", balance.setScale(currency.decimalPlaces, RoundingMode.HALF_UP).toPlainString()))
         } else {
             ctx.reply(messages.adminCheckHeader.replace("{player}", playerName))
             for (currency in CurrencyRegistry.getAll()) {
@@ -222,7 +223,7 @@ object AdminCommand {
                     .replace("{color}", currency.color)
                     .replace("{symbol}", currency.symbol)
                     .replace("{display_name}", currency.displayName)
-                    .replace("{balance}", balance.setScale(currency.decimalPlaces).toPlainString())
+                    .replace("{balance}", balance.setScale(currency.decimalPlaces, RoundingMode.HALF_UP).toPlainString())
                 ctx.reply(msg)
             }
             ctx.reply(messages.balanceFooter)

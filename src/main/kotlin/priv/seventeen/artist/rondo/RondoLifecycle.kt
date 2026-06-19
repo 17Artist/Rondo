@@ -1,7 +1,10 @@
 package priv.seventeen.artist.rondo
 
+import org.bukkit.Bukkit
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
+import org.bukkit.permissions.Permission
+import org.bukkit.permissions.PermissionDefault
 import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.blink.event.AutoListener
 import priv.seventeen.artist.blink.lifecycle.Awake
@@ -62,6 +65,9 @@ object RondoLifecycle {
         // 初始化排行榜
         RankingManager.initialize(MainConfig.instance)
 
+        // 注册权限节点（Bukkit 对未注册权限默认按 OP 处理，必须显式注册玩家权限默认值）
+        registerPermissions()
+
         // 注册命令
         MoneyCommand.register()
         AdminCommand.register()
@@ -78,6 +84,26 @@ object RondoLifecycle {
 
         val mode = if (MainConfig.instance.crossServer.enabled && RedisManager.isEnabled) "§b跨服" else "§7单服"
         BlinkLog.success("Rondo 已启用 §7(${CurrencyRegistry.getAll().size} 个货币, $mode§7)")
+    }
+
+    /**
+     * 注册权限节点及其默认值。
+     * Bukkit 对未注册的权限节点默认按 OP 语义处理，若不注册，普通玩家会被
+     * BlinkCommand 的 hasPermission 校验拒绝，无法使用 /money 等基础命令。
+     */
+    private fun registerPermissions() {
+        val pm = Bukkit.getPluginManager()
+        fun reg(node: String, default: PermissionDefault) {
+            if (pm.getPermission(node) == null) {
+                pm.addPermission(Permission(node, default))
+            }
+        }
+        reg("rondo.use", PermissionDefault.TRUE)
+        reg("rondo.transfer", PermissionDefault.TRUE)
+        reg("rondo.exchange", PermissionDefault.TRUE)
+        reg("rondo.log", PermissionDefault.TRUE)
+        reg("rondo.top", PermissionDefault.TRUE)
+        reg("rondo.admin", PermissionDefault.OP)
     }
 
     @Awake(LifeCycle.DISABLE, priority = 0)

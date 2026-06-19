@@ -26,8 +26,11 @@ interface StorageProvider {
     /** 批量保存余额 */
     fun saveBalancesBatch(entries: List<BalanceEntry>)
 
-    /** 直接更新离线玩家余额（原子操作） */
-    fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean = false): Boolean
+    /**
+     * 直接更新离线玩家余额（原子操作）
+     * @param maxBalance 余额上限，存入时若超过则拒绝；传 null 表示不校验上限（用于回滚等强制写入）
+     */
+    fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean = false, maxBalance: BigDecimal? = null): Boolean
 
     /** 获取离线玩家余额 */
     fun getOfflineBalance(playerUuid: UUID, currencyId: String): BalanceData?

@@ -78,6 +78,19 @@ class Account(val playerUuid: UUID) {
         return true
     }
 
+    /** 强制存入：不校验余额上限，仅用于回滚等必须恢复资金的场景 */
+    fun forceDeposit(currencyId: String, amount: BigDecimal): Boolean {
+        val key = currencyId.lowercase()
+        val current = getBalanceData(currencyId)
+        balances[key] = BalanceData(
+            balance = current.balance.add(amount),
+            totalEarned = current.totalEarned.add(amount),
+            totalSpent = current.totalSpent
+        )
+        dirty = true
+        return true
+    }
+
     /** 扣除 */
     fun withdraw(currencyId: String, amount: BigDecimal): Boolean {
         val currency = CurrencyRegistry.get(currencyId) ?: return false

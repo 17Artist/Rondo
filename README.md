@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/public/logo.svg" alt="Rondo" width="160">
   <h1>Rondo</h1>
-  <p><strong>通用多经济系统 Minecraft 插件</strong></p>
+  <p><strong>通用多货币经济 Minecraft 插件</strong></p>
   <p>配置驱动 · 高性能 · 跨服同步</p>
 
   ![Minecraft](https://img.shields.io/badge/Minecraft-1.18.2+-green?style=flat-square)
@@ -23,9 +23,9 @@ Rondo 是一个基于 [Blink](https://github.com/17Artist/Blink) 框架的通用
 - **Redis 跨服同步** — Lua 原子事务保证多服余额强一致性，Pub/Sub 实时通知
 - **排行榜系统** — 自动维护每种货币的排行榜，定时刷新
 - **完整流水日志** — 异步记录每笔交易，支持按货币、时间查询，自动清理过期日志
-- **Vault & PlaceholderAPI** — 无缝对接主流插件生态
+- **Vault & PlaceholderAPI** — 接入主流经济插件，余额可在计分板、Tab 等界面显示
 - **高性能设计** — 内存缓存 + 异步批量持久化，支持 SQLite 和 MySQL
-- **离线操作** — 管理员命令支持对离线玩家操作
+- **离线操作** — 管理员命令可直接作用于离线玩家
 
 ## 环境要求
 
@@ -64,7 +64,10 @@ Rondo 是一个基于 [Blink](https://github.com/17Artist/Blink) 框架的通用
 | `/rondo set <玩家> <货币> <数量>` | 设置余额 |
 | `/rondo check <玩家> [货币]` | 查看余额 |
 | `/rondo log <玩家> [货币] [页码]` | 查看流水 |
+| `/rondo reset <玩家> <货币>` | 重置余额为默认值 |
 | `/rondo reload` | 重载配置 |
+
+> `/rondo reload` 只热重载货币、兑换规则、消息与排行榜。切换存储类型或启用跨服（Redis）需要重启服务器。
 
 ## 货币配置示例
 

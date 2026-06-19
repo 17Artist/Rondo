@@ -14,6 +14,7 @@ import priv.seventeen.artist.rondo.exchange.ExchangeManager
 import priv.seventeen.artist.rondo.log.TransactionLog
 import priv.seventeen.artist.rondo.ranking.RankingManager
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -71,7 +72,7 @@ object MoneyCommand {
                 .replace("{color}", currency.color)
                 .replace("{symbol}", currency.symbol)
                 .replace("{display_name}", currency.displayName)
-                .replace("{balance}", balance.setScale(currency.decimalPlaces).toPlainString())
+                .replace("{balance}", balance.setScale(currency.decimalPlaces, RoundingMode.HALF_UP).toPlainString())
             ctx.reply(msg)
         }
         ctx.reply(messages.balanceFooter)
@@ -96,7 +97,7 @@ object MoneyCommand {
             return
         }
 
-        val amount = try { BigDecimal(amountStr) } catch (_: Exception) {
+        val amount = try { BigDecimal(amountStr).setScale(currency.decimalPlaces, RoundingMode.DOWN) } catch (_: Exception) {
             ctx.reply(messages.errorInvalidAmount.replace("{prefix}", messages.prefix))
             return
         }
@@ -138,8 +139,8 @@ object MoneyCommand {
 
     private fun handleExchange(ctx: CommandContext) {
         val player = ctx.sender as Player
-        val fromId = ctx.arg(0)
-        val toId = ctx.arg(1)
+        val fromId = ctx.arg(0).lowercase()
+        val toId = ctx.arg(1).lowercase()
         val amountStr = ctx.arg(2)
 
         val amount = try { BigDecimal(amountStr) } catch (_: Exception) {
@@ -261,7 +262,7 @@ object MoneyCommand {
                 .replace("{player}", entry.playerName)
                 .replace("{color}", currency.color)
                 .replace("{symbol}", currency.symbol)
-                .replace("{balance}", entry.balance.setScale(currency.decimalPlaces).toPlainString())
+                .replace("{balance}", entry.balance.setScale(currency.decimalPlaces, RoundingMode.HALF_UP).toPlainString())
             ctx.reply(msg)
         }
 

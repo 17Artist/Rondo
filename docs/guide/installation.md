@@ -7,7 +7,7 @@
 - Spigot 或 Paper 1.18.2+
 
 ### 可选
-- [Vault](https://www.spigotmc.org/resources/vault.34315/) — 经济接口桥接
+- [Vault](https://www.spigotmc.org/resources/vault.34315/) — 对接 Vault 经济接口
 - [PlaceholderAPI](https://www.spigotmc.org/resources/placeholderapi.6245/) — 占位符支持
 - Redis — 跨服同步
 
@@ -21,7 +21,11 @@
 
 ### 2. 配置
 
-首次启动后编辑配置文件，然后 `/rondo reload`。
+首次启动后编辑配置文件，再用 `/rondo reload` 重载。
+
+::: warning reload 的作用范围
+`/rondo reload` 只热重载货币、兑换规则、消息文本与排行榜刷新。涉及数据层的改动——切换 `storage.type`、启用或关闭 `cross-server`（Redis）——必须**重启服务器**才能生效。
+:::
 
 ## MySQL 部署
 
@@ -45,7 +49,7 @@ storage:
     pool-size: 10
 ```
 
-3. 重启服务器或 `/rondo reload`
+3. 重启服务器（切换存储类型必须重启，`/rondo reload` 不会重建存储连接）
 
 Rondo 会自动创建所需的表结构。
 

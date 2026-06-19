@@ -48,11 +48,13 @@ object RankingManager {
         return (list.size + pageSize - 1) / pageSize
     }
 
-    /** 获取玩家排名 */
+    /**
+     * 获取玩家排名（仅基于已缓存的排行榜，避免在主线程发起阻塞式数据库查询）。
+     * 若玩家不在缓存的前 rankingSize 名内，返回 null（视为未上榜）。
+     */
     fun getPlayerRank(player: UUID, currencyId: String): Int? {
         val list = rankings[currencyId] ?: return null
-        val entry = list.firstOrNull { it.playerUuid == player }
-        return entry?.rank ?: StorageManager.provider.queryPlayerRank(player, currencyId)
+        return list.firstOrNull { it.playerUuid == player }?.rank
     }
 
     /** 刷新所有排行榜 */

@@ -46,22 +46,25 @@ object RondoAPI {
     fun deposit(player: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
         if (amount <= BigDecimal.ZERO) return false
         val currency = CurrencyRegistry.get(currencyId) ?: return false
+        // 归一到货币精度，避免存储超出精度的小数导致后续显示异常
+        val amt = amount.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
+        if (amt <= BigDecimal.ZERO) return false
 
         val oldBalance = getBalance(player, currencyId)
-        val newBalance = oldBalance.add(amount)
+        val newBalance = oldBalance.add(amt)
 
         // 触发事件
-        val event = EconomyTransactionEvent(player, currency, EconomyTransactionEvent.Action.DEPOSIT, amount, oldBalance, newBalance, source)
+        val event = EconomyTransactionEvent(player, currency, EconomyTransactionEvent.Action.DEPOSIT, amt, oldBalance, newBalance, source)
         Bukkit.getPluginManager().callEvent(event)
         if (event.isCancelled) return false
 
-        val success = AccountManager.depositOffline(player, currencyId, amount, source)
+        val success = AccountManager.depositOffline(player, currencyId, amt, source)
         if (success) {
             LogManager.submit(TransactionLog(
                 playerUuid = player,
                 currencyId = currencyId,
                 action = TransactionLog.Action.DEPOSIT,
-                amount = amount,
+                amount = amt,
                 balanceAfter = newBalance,
                 source = source
             ))
@@ -73,22 +76,24 @@ object RondoAPI {
     fun withdraw(player: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
         if (amount <= BigDecimal.ZERO) return false
         val currency = CurrencyRegistry.get(currencyId) ?: return false
+        val amt = amount.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
+        if (amt <= BigDecimal.ZERO) return false
 
         val oldBalance = getBalance(player, currencyId)
-        val newBalance = oldBalance.subtract(amount)
+        val newBalance = oldBalance.subtract(amt)
 
         // 触发事件
-        val event = EconomyTransactionEvent(player, currency, EconomyTransactionEvent.Action.WITHDRAW, amount, oldBalance, newBalance, source)
+        val event = EconomyTransactionEvent(player, currency, EconomyTransactionEvent.Action.WITHDRAW, amt, oldBalance, newBalance, source)
         Bukkit.getPluginManager().callEvent(event)
         if (event.isCancelled) return false
 
-        val success = AccountManager.withdrawOffline(player, currencyId, amount, source)
+        val success = AccountManager.withdrawOffline(player, currencyId, amt, source)
         if (success) {
             LogManager.submit(TransactionLog(
                 playerUuid = player,
                 currencyId = currencyId,
                 action = TransactionLog.Action.WITHDRAW,
-                amount = amount,
+                amount = amt,
                 balanceAfter = newBalance,
                 source = source
             ))
@@ -99,22 +104,23 @@ object RondoAPI {
     /** 设置余额 */
     fun setBalance(player: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
         val currency = CurrencyRegistry.get(currencyId) ?: return false
+        val amt = amount.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
 
         val oldBalance = getBalance(player, currencyId)
 
         // 触发事件
-        val event = EconomyTransactionEvent(player, currency, EconomyTransactionEvent.Action.SET, amount, oldBalance, amount, source)
+        val event = EconomyTransactionEvent(player, currency, EconomyTransactionEvent.Action.SET, amt, oldBalance, amt, source)
         Bukkit.getPluginManager().callEvent(event)
         if (event.isCancelled) return false
 
-        val success = AccountManager.setBalanceOffline(player, currencyId, amount, source)
+        val success = AccountManager.setBalanceOffline(player, currencyId, amt, source)
         if (success) {
             LogManager.submit(TransactionLog(
                 playerUuid = player,
                 currencyId = currencyId,
                 action = TransactionLog.Action.SET,
-                amount = amount,
-                balanceAfter = amount,
+                amount = amt,
+                balanceAfter = amt,
                 source = source
             ))
         }
@@ -128,10 +134,14 @@ object RondoAPI {
         if (!currency.transferable) return TransferResult(false, "该货币不支持转账")
         if (from == to) return TransferResult(false, "不能给自己转账")
 
+        // 归一到货币精度
+        val amt = amount.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
+        if (amt <= BigDecimal.ZERO) return TransferResult(false, "无效金额")
+
         // 计算税
         val taxRate = BigDecimal.valueOf(currency.transferTaxRate)
-        val taxAmount = amount.multiply(taxRate).setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
-        val totalCost = amount.add(taxAmount)
+        val taxAmount = amt.multiply(taxRate).setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
+        val totalCost = amt.add(taxAmount)
 
         // 检查余额
         if (!hasBalance(from, currencyId, totalCost)) {
@@ -139,7 +149,7 @@ object RondoAPI {
         }
 
         // 触发事件
-        val event = EconomyTransferEvent(from, to, currency, amount, taxAmount)
+        val event = EconomyTransferEvent(from, to, currency, amt, taxAmount)
         Bukkit.getPluginManager().callEvent(event)
         if (event.isCancelled) return TransferResult(false, "转账被取消", taxAmount = taxAmount)
 
@@ -147,10 +157,10 @@ object RondoAPI {
         val withdrawSuccess = AccountManager.withdrawOffline(from, currencyId, totalCost, "transfer:out")
         if (!withdrawSuccess) return TransferResult(false, "扣款失败", taxAmount = taxAmount)
 
-        val depositSuccess = AccountManager.depositOffline(to, currencyId, amount, "transfer:in")
+        val depositSuccess = AccountManager.depositOffline(to, currencyId, amt, "transfer:in")
         if (!depositSuccess) {
-            // 回滚扣款
-            val rollbackSuccess = AccountManager.depositOffline(from, currencyId, totalCost, "transfer:rollback")
+            // 回滚扣款（强制存入，绕过余额上限，确保不丢失资金）
+            val rollbackSuccess = AccountManager.forceDepositOffline(from, currencyId, totalCost, "transfer:rollback")
             if (!rollbackSuccess) {
                 // 回滚失败，记录严重错误日志
                 BlinkLog.warn("§c[CRITICAL] Transfer rollback failed! From=$from, To=$to, Currency=$currencyId, Amount=$totalCost")
@@ -177,7 +187,7 @@ object RondoAPI {
         LogManager.submit(TransactionLog(
             playerUuid = to, currencyId = currencyId,
             action = TransactionLog.Action.TRANSFER_IN,
-            amount = amount, balanceAfter = toBalance,
+            amount = amt, balanceAfter = toBalance,
             source = "transfer:from:$from"
         ))
 

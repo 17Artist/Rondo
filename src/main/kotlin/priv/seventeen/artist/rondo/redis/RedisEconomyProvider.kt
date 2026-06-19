@@ -68,6 +68,23 @@ object RedisEconomyProvider {
         return success
     }
 
+    /** 强制存入：不校验余额上限（maxBal=-1），仅用于回滚等必须恢复资金的场景 */
+    fun forceDeposit(playerUuid: UUID, currencyId: String, amount: BigDecimal): Boolean {
+        val key = "$KEY_BALANCE:$playerUuid"
+        val earnedKey = "$KEY_EARNED:$playerUuid"
+
+        val result = RedisManager.use { jedis ->
+            jedis.eval(
+                DEPOSIT_LUA,
+                listOf(key, earnedKey),
+                listOf(currencyId, amount.toPlainString(), "-1")
+            )
+        }
+        val success = (result as Long) == 1L
+        if (success) RedisManager.publishSync(playerUuid, currencyId)
+        return success
+    }
+
     /** 扣除货币（原子操作） */
     fun withdraw(playerUuid: UUID, currencyId: String, amount: BigDecimal, allowNegative: Boolean): Boolean {
         val key = "$KEY_BALANCE:$playerUuid"

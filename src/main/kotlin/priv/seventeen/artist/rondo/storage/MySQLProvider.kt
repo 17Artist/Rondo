@@ -156,7 +156,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         }
     }
 
-    override fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean): Boolean {
+    override fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean, maxBalance: BigDecimal?): Boolean {
         getConnection().use { conn ->
             conn.autoCommit = false
             try {
@@ -171,19 +171,27 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                 }
 
                 // 更新余额
-                val sql = if (delta >= BigDecimal.ZERO) {
-                    "UPDATE rondo_balance SET balance = balance + ?, total_earned = total_earned + ? WHERE player_uuid = ? AND currency_id = ?"
-                } else if (allowNegative) {
-                    "UPDATE rondo_balance SET balance = balance + ?, total_spent = total_spent + ? WHERE player_uuid = ? AND currency_id = ?"
-                } else {
-                    "UPDATE rondo_balance SET balance = balance + ?, total_spent = total_spent + ? WHERE player_uuid = ? AND currency_id = ? AND balance + ? >= 0"
+                val depositWithCap = delta >= BigDecimal.ZERO && maxBalance != null
+                val sql = when {
+                    // 存入并校验上限：仅当不超过上限时才更新
+                    depositWithCap ->
+                        "UPDATE rondo_balance SET balance = balance + ?, total_earned = total_earned + ? WHERE player_uuid = ? AND currency_id = ? AND balance + ? <= ?"
+                    delta >= BigDecimal.ZERO ->
+                        "UPDATE rondo_balance SET balance = balance + ?, total_earned = total_earned + ? WHERE player_uuid = ? AND currency_id = ?"
+                    allowNegative ->
+                        "UPDATE rondo_balance SET balance = balance + ?, total_spent = total_spent + ? WHERE player_uuid = ? AND currency_id = ?"
+                    else ->
+                        "UPDATE rondo_balance SET balance = balance + ?, total_spent = total_spent + ? WHERE player_uuid = ? AND currency_id = ? AND balance + ? >= 0"
                 }
                 conn.prepareStatement(sql).use { ps ->
                     ps.setBigDecimal(1, delta)
                     ps.setBigDecimal(2, delta.abs())
                     ps.setString(3, playerUuid.toString())
                     ps.setString(4, currencyId)
-                    if (delta < BigDecimal.ZERO && !allowNegative) {
+                    if (depositWithCap) {
+                        ps.setBigDecimal(5, delta)
+                        ps.setBigDecimal(6, maxBalance)
+                    } else if (delta < BigDecimal.ZERO && !allowNegative) {
                         ps.setBigDecimal(5, delta)
                     }
                     val rows = ps.executeUpdate()

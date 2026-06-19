@@ -113,7 +113,22 @@ object AccountManager {
         }
         val online = accounts[playerUuid]
         if (online != null) return online.deposit(currencyId, amount)
-        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount, source)
+        // 离线存入同样校验余额上限，与在线 Account.deposit 保持一致
+        val currency = CurrencyRegistry.get(currencyId)
+        val maxBalance = if (currency != null && currency.hasMaxBalance) currency.maxBalance else null
+        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount, source, maxBalance = maxBalance)
+    }
+
+    /** 强制存入：不校验余额上限，仅用于回滚等必须恢复资金的场景 */
+    fun forceDepositOffline(playerUuid: UUID, currencyId: String, amount: BigDecimal, source: String): Boolean {
+        if (crossServer) {
+            val success = RedisEconomyProvider.forceDeposit(playerUuid, currencyId, amount)
+            if (success) refreshLocalCache(playerUuid, currencyId)
+            return success
+        }
+        val online = accounts[playerUuid]
+        if (online != null) return online.forceDeposit(currencyId, amount)
+        return StorageManager.provider.updateOfflineBalance(playerUuid, currencyId, amount, source, maxBalance = null)
     }
 
     /** 扣除 */

@@ -162,7 +162,7 @@ class SQLiteProvider : StorageProvider {
         }
     }
 
-    override fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean): Boolean {
+    override fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean, maxBalance: BigDecimal?): Boolean {
         synchronized(lock) {
             val conn = getConnection()
             conn.autoCommit = false
@@ -196,6 +196,11 @@ class SQLiteProvider : StorageProvider {
                 // 检查余额是否足够（扣款时）
                 val newBalance = current.add(delta)
                 if (delta < BigDecimal.ZERO && newBalance < BigDecimal.ZERO && !allowNegative) {
+                    conn.rollback()
+                    return false
+                }
+                // 检查余额上限（存入时），与在线 Account.deposit 保持一致
+                if (delta > BigDecimal.ZERO && maxBalance != null && newBalance > maxBalance) {
                     conn.rollback()
                     return false
                 }

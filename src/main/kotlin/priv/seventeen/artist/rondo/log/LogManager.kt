@@ -72,8 +72,11 @@ object LogManager {
                     // 重新入队
                     batch.forEach { queue.offer(it) }
                 } else {
-                    BlinkLog.warn("Failed to flush transaction logs $MAX_FAILURES times, discarding ${batch.size} entries.")
-                    // 超过重试次数，丢弃这批日志
+                    // 超过重试次数：丢弃前先将明细打印到控制台，避免审计记录被静默丢失
+                    BlinkLog.warn("Failed to flush transaction logs $MAX_FAILURES times, dumping ${batch.size} entries to console before discarding:")
+                    for (log in batch) {
+                        BlinkLog.warn("  [lost-log] ${log.timestamp} ${log.playerUuid} ${log.currencyId} ${log.action} ${log.amount.toPlainString()} -> ${log.balanceAfter.toPlainString()} (${log.source})")
+                    }
                     consecutiveFailures = 0
                 }
             }

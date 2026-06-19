@@ -7,6 +7,7 @@ import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
 import priv.seventeen.artist.rondo.ranking.RankingManager
+import java.math.RoundingMode
 
 /**
  * PlaceholderAPI 对接
@@ -54,9 +55,6 @@ class RondoExpansion : PlaceholderExpansion() {
     override fun onRequest(player: OfflinePlayer?, params: String): String? {
         if (player == null) return null
 
-        val parts = params.split("_")
-        if (parts.isEmpty()) return null
-
         return when {
             // %rondo_balance_<id>%
             params.startsWith("balance_formatted_") -> {
@@ -69,7 +67,7 @@ class RondoExpansion : PlaceholderExpansion() {
                 val currencyId = params.removePrefix("balance_")
                 val currency = CurrencyRegistry.get(currencyId) ?: return null
                 val balance = RondoAPI.getBalance(player.uniqueId, currencyId)
-                balance.setScale(currency.decimalPlaces).toPlainString()
+                balance.setScale(currency.decimalPlaces, RoundingMode.HALF_UP).toPlainString()
             }
 
             // %rondo_total_earned_<id>%
@@ -78,7 +76,7 @@ class RondoExpansion : PlaceholderExpansion() {
                 val currency = CurrencyRegistry.get(currencyId) ?: return null
                 val account = priv.seventeen.artist.rondo.account.AccountManager.getAccount(player.uniqueId)
                 val data = account?.getBalanceData(currencyId)
-                data?.totalEarned?.setScale(currency.decimalPlaces)?.toPlainString() ?: "0"
+                data?.totalEarned?.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)?.toPlainString() ?: "0"
             }
 
             // %rondo_total_spent_<id>%
@@ -87,7 +85,7 @@ class RondoExpansion : PlaceholderExpansion() {
                 val currency = CurrencyRegistry.get(currencyId) ?: return null
                 val account = priv.seventeen.artist.rondo.account.AccountManager.getAccount(player.uniqueId)
                 val data = account?.getBalanceData(currencyId)
-                data?.totalSpent?.setScale(currency.decimalPlaces)?.toPlainString() ?: "0"
+                data?.totalSpent?.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)?.toPlainString() ?: "0"
             }
 
             // %rondo_top_<id>_<rank>_name% / %rondo_top_<id>_<rank>_balance%
@@ -124,7 +122,7 @@ class RondoExpansion : PlaceholderExpansion() {
                                     "name" -> entry.playerName
                                     "balance" -> {
                                         val c = CurrencyRegistry.get(id)
-                                        entry.balance.setScale(c?.decimalPlaces ?: 0).toPlainString()
+                                        entry.balance.setScale(c?.decimalPlaces ?: 0, RoundingMode.HALF_UP).toPlainString()
                                     }
                                     else -> null
                                 }
@@ -141,7 +139,7 @@ class RondoExpansion : PlaceholderExpansion() {
                     "name" -> entry.playerName
                     "balance" -> {
                         val currency = CurrencyRegistry.get(currencyId)
-                        entry.balance.setScale(currency?.decimalPlaces ?: 0).toPlainString()
+                        entry.balance.setScale(currency?.decimalPlaces ?: 0, RoundingMode.HALF_UP).toPlainString()
                     }
                     else -> null
                 }

@@ -14,7 +14,7 @@ vault-primary: true
 ```
 
 ::: warning 注意
-全局只能有一种货币设为 `vault-primary: true`。如果多个货币都设为 true，只有第一个被加载的会生效。
+全局只能有一种货币设为 `vault-primary: true`。如果多个货币都设为 true，具体生效哪一个并不确定（取决于加载顺序），请务必只保留一个。
 :::
 
 ## 工作原理
@@ -23,10 +23,11 @@ vault-primary: true
 - 其他插件通过 Vault API 操作经济时，实际调用 Rondo 的内部逻辑
 - 所有通过 Vault 的操作都会记录流水日志（source 为 `vault`）
 - Vault 操作同样会触发 `EconomyTransactionEvent`
+- `Economy.format()` 返回的字符串包含货币的颜色代码与符号（如 `§6G1500.00`），少数严格解析数字的插件可能需要注意
 
 ## 兼容性
 
-以下类型的插件可以通过 Vault 与 Rondo 协作：
+以下类型的插件可以通过 Vault 与 Rondo 配合使用：
 
 - 商店插件（ShopGUI+, EconomyShopGUI 等）
 - 领地插件（Residence, GriefPrevention 等）

@@ -2,6 +2,10 @@
 
 主配置文件位于 `plugins/Rondo/config.yml`。
 
+::: tip 配置生效方式
+`/rondo reload` 只热重载货币、兑换规则、消息文本与排行榜刷新。`config.yml` 中的存储类型、跨服开关以及 `performance` 下的定时参数（`save-interval`、`ranking-refresh` 等）在启动时初始化，修改后需要**重启服务器**才会生效。
+:::
+
 ## 完整配置
 
 ```yaml

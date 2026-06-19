@@ -12,7 +12,8 @@ repositories {
 }
 
 dependencies {
-    compileOnly("priv.seventeen.artist:Rondo:1.0.0")
+    // 制品 ID 为小写 rondo；版本号以仓库中实际发布的为准
+    compileOnly("priv.seventeen.artist:rondo:1.0.0")
 }
 ```
 

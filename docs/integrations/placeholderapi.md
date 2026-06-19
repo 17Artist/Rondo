@@ -47,6 +47,14 @@ Rondo 提供丰富的 PlaceholderAPI 占位符，可用于计分板、Tab 列表
 %rondo_rank_gold%
 ```
 
+## 注意事项
+
+- `%rondo_balance_<ID>%` 会按货币的 `decimal-places` 输出小数位，例如两位小数货币显示为 `1500.00`。
+- `%rondo_total_earned_<ID>%` 和 `%rondo_total_spent_<ID>%` 仅对**在线玩家**有效，玩家离线时返回 `0`。
+- `%rondo_top_*%` 和 `%rondo_rank_<ID>%` 依赖排行榜缓存，只对设置了 `ranking-enabled: true` 的货币有效；对关闭排行榜的货币（如默认的点券）将返回空或未上榜。
+- `%rondo_rank_<ID>%` 在玩家未进入排行榜缓存（前 `ranking-size` 名）时返回 `未上榜`。
+- `%rondo_top_<ID>_<排名>_*%` 在该名次暂无数据时返回 `---`。
+
 ## 计分板示例
 
 ```yaml

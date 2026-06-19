@@ -16,6 +16,7 @@ import priv.seventeen.artist.rondo.log.LogManager
 import priv.seventeen.artist.rondo.log.TransactionLog
 import priv.seventeen.artist.rondo.storage.StorageManager
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -78,9 +79,13 @@ object ExchangeManager {
 
     fun getAllRules(): Collection<ExchangeRule> = rules.values
 
-    /** 根据源和目标货币查找规则 */
+    /** 根据源和目标货币查找规则（货币 ID 大小写不敏感，与货币注册表一致） */
     fun findRule(fromCurrency: String, toCurrency: String): ExchangeRule? {
-        return rules.values.firstOrNull { it.fromCurrency == fromCurrency && it.toCurrency == toCurrency && it.enabled }
+        return rules.values.firstOrNull {
+            it.fromCurrency.equals(fromCurrency, ignoreCase = true) &&
+                it.toCurrency.equals(toCurrency, ignoreCase = true) &&
+                it.enabled
+        }
     }
 
     fun getRuleIds(): Set<String> = rules.keys.toSet()
@@ -93,41 +98,46 @@ object ExchangeManager {
         val fromCurrency = CurrencyRegistry.get(rule.fromCurrency) ?: return ExchangeResult(false, "源货币不存在")
         val toCurrency = CurrencyRegistry.get(rule.toCurrency) ?: return ExchangeResult(false, "目标货币不存在")
 
-        if (targetAmount < rule.minAmount) {
+        // 归一到各自货币精度
+        val target = targetAmount.setScale(toCurrency.decimalPlaces, RoundingMode.HALF_UP)
+        if (target <= BigDecimal.ZERO) return ExchangeResult(false, "无效金额")
+
+        if (target < rule.minAmount) {
             return ExchangeResult(false, "最小兑换数量为 ${rule.minAmount}")
         }
 
         if (rule.maxPerPeriod > 0 && rule.period != ExchangePeriod.NONE) {
             val sinceTimestamp = getPeriodStart(rule.period)
             val used = StorageManager.provider.queryExchangeCount(player, ruleId, sinceTimestamp)
-            if (used.add(targetAmount) > BigDecimal.valueOf(rule.maxPerPeriod.toLong())) {
-                val remaining = BigDecimal.valueOf(rule.maxPerPeriod.toLong()).subtract(used)
+            if (used.add(target) > BigDecimal.valueOf(rule.maxPerPeriod.toLong())) {
+                val remaining = BigDecimal.valueOf(rule.maxPerPeriod.toLong()).subtract(used).max(BigDecimal.ZERO)
                 return ExchangeResult(false, "已达到本周期兑换上限，剩余额度: $remaining")
             }
         }
 
-        val fromAmount = rule.calculateCost(targetAmount)
+        val fromAmount = rule.calculateCost(target).setScale(fromCurrency.decimalPlaces, RoundingMode.HALF_UP)
 
         val balance = AccountManager.getBalance(player, rule.fromCurrency)
         if (balance < fromAmount) {
             return ExchangeResult(false, "余额不足，需要 ${fromCurrency.format(fromAmount)}", fromAmount = fromAmount)
         }
 
-        val event = EconomyExchangeEvent(player, fromCurrency, toCurrency, fromAmount, targetAmount)
+        val event = EconomyExchangeEvent(player, fromCurrency, toCurrency, fromAmount, target)
         Bukkit.getPluginManager().callEvent(event)
         if (event.isCancelled) return ExchangeResult(false, "兑换被取消")
 
         val withdrawSuccess = AccountManager.withdrawOffline(player, rule.fromCurrency, fromAmount, "exchange:$ruleId")
         if (!withdrawSuccess) return ExchangeResult(false, "扣款失败")
 
-        val depositSuccess = AccountManager.depositOffline(player, rule.toCurrency, targetAmount, "exchange:$ruleId")
+        val depositSuccess = AccountManager.depositOffline(player, rule.toCurrency, target, "exchange:$ruleId")
         if (!depositSuccess) {
-            AccountManager.depositOffline(player, rule.fromCurrency, fromAmount, "exchange:rollback:$ruleId")
+            // 回滚扣款（强制存入，绕过余额上限，确保不丢失资金）
+            AccountManager.forceDepositOffline(player, rule.fromCurrency, fromAmount, "exchange:rollback:$ruleId")
             return ExchangeResult(false, "存入失败")
         }
 
         try {
-            StorageManager.provider.insertExchangeRecord(player, ruleId, targetAmount)
+            StorageManager.provider.insertExchangeRecord(player, ruleId, target)
         } catch (e: Exception) {
             BlinkLog.warn("Failed to insert exchange record for $player/$ruleId: ${e.message}")
         }
@@ -144,11 +154,11 @@ object ExchangeManager {
         LogManager.submit(TransactionLog(
             playerUuid = player, currencyId = rule.toCurrency,
             action = TransactionLog.Action.EXCHANGE_IN,
-            amount = targetAmount, balanceAfter = toBalance,
+            amount = target, balanceAfter = toBalance,
             source = "exchange:$ruleId"
         ))
 
-        return ExchangeResult(true, "兑换成功", fromAmount = fromAmount, toAmount = targetAmount)
+        return ExchangeResult(true, "兑换成功", fromAmount = fromAmount, toAmount = target)
     }
 
     private fun loadRules() {
@@ -178,6 +188,8 @@ object ExchangeManager {
                 cal.set(Calendar.MILLISECOND, 0)
             }
             ExchangePeriod.WEEKLY -> {
+                // 以周一为一周起点，避免依赖系统区域的 firstDayOfWeek 导致跨周计算错误
+                cal.firstDayOfWeek = Calendar.MONDAY
                 cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
                 cal.set(Calendar.HOUR_OF_DAY, 0)
                 cal.set(Calendar.MINUTE, 0)

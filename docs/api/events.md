@@ -75,13 +75,15 @@ class EconomyExchangeEvent(
 ```kotlin
 @EventHandler
 fun onExchange(event: EconomyExchangeEvent) {
-    // VIP 玩家兑换免手续费（如果有的话）
-    // 或者在特定条件下禁止兑换
+    // 示例：禁止将货币兑换为点券
+    if (event.toCurrency.id == "points") {
+        event.isCancelled = true
+    }
 }
 ```
 
 ## 注意事项
 
-- 所有事件在**主线程**触发
+- 事件在**调用 API 的线程**上触发：从主线程调用则为同步事件，从异步线程调用（例如其他插件在异步任务中操作经济）则为异步事件。因此监听器不应假设自己一定运行在主线程，若需要访问非线程安全的 Bukkit API，请自行切回主线程。
 - 取消事件后，对应操作不会执行
 - `source` 字段可用于区分操作来源，避免循环触发
