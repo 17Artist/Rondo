@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.currency
 
 import priv.seventeen.artist.blink.BlinkLog
@@ -7,8 +23,8 @@ import priv.seventeen.artist.blink.config.BlinkConfigFolder
 import priv.seventeen.artist.blink.config.Comment
 import priv.seventeen.artist.blink.config.ConfigKey
 import org.bukkit.plugin.java.JavaPlugin
+import java.io.File
 import java.math.BigDecimal
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 单个货币的 BlinkConfig
@@ -40,7 +56,7 @@ class CurrencyConfig(plugin: JavaPlugin, path: String) : BlinkConfig(plugin, pat
     var transferable: Boolean = false
 
     @ConfigKey("transfer-tax-rate")
-    var transferTaxRate: Double = 0.0
+    var transferTaxRate: String = "0"
 
     @ConfigKey("vault-primary")
     var vaultPrimary: Boolean = false
@@ -50,19 +66,52 @@ class CurrencyConfig(plugin: JavaPlugin, path: String) : BlinkConfig(plugin, pat
 
     /** 转换为不可变的 Currency 数据对象 */
     fun toCurrency(): Currency {
+        val canonicalId = id.trim().lowercase()
+        require(canonicalId.matches(Regex("[a-z0-9][a-z0-9_-]{0,63}"))) {
+            "id 必须为 1-64 位小写字母、数字、下划线或连字符"
+        }
+        require(id == canonicalId) { "id 必须使用规范小写形式 '$canonicalId'" }
+        require(decimalPlaces in 0..MoneyConstraints.MAX_DECIMAL_PLACES) {
+            "decimal-places 必须在 0..${MoneyConstraints.MAX_DECIMAL_PLACES} 之间"
+        }
+        val parsedTransferTaxRate = BigDecimal(transferTaxRate)
+        require(parsedTransferTaxRate in BigDecimal.ZERO..BigDecimal.ONE) {
+            "transfer-tax-rate 必须在 0..1 之间"
+        }
+        require(parsedTransferTaxRate.stripTrailingZeros().scale().coerceAtLeast(0) <= 12) {
+            "transfer-tax-rate 最多支持 12 位有效小数"
+        }
+
+        val parsedMaxBalance = BigDecimal(maxBalance)
+        val parsedDefaultBalance = BigDecimal(defaultBalance)
+        val unlimited = parsedMaxBalance.compareTo(BigDecimal.ONE.negate()) == 0
+        require(unlimited || parsedMaxBalance >= BigDecimal.ZERO) {
+            "max-balance 只能为 -1 或非负数"
+        }
+        if (!unlimited) {
+            MoneyConstraints.requireStorable(parsedMaxBalance, "max-balance")
+        }
+        MoneyConstraints.requireStorable(parsedDefaultBalance, "default-balance")
+        require(negativeAllowed || parsedDefaultBalance >= BigDecimal.ZERO) {
+            "negative-allowed=false 时 default-balance 不能为负数"
+        }
+        require(unlimited || parsedDefaultBalance <= parsedMaxBalance) {
+            "default-balance 不能超过 max-balance"
+        }
+
         return Currency(
-            id = id,
-            displayName = displayName.ifEmpty { id },
+            id = canonicalId,
+            displayName = displayName.ifBlank { canonicalId },
             symbol = symbol,
             color = translateColor(color),
             description = description,
             decimalPlaces = decimalPlaces,
-            maxBalance = BigDecimal(maxBalance),
-            defaultBalance = BigDecimal(defaultBalance),
+            maxBalance = parsedMaxBalance,
+            defaultBalance = parsedDefaultBalance,
             negativeAllowed = negativeAllowed,
             tradeable = tradeable,
             transferable = transferable,
-            transferTaxRate = transferTaxRate,
+            transferTaxRate = parsedTransferTaxRate,
             vaultPrimary = vaultPrimary,
             rankingEnabled = rankingEnabled
         )
@@ -97,10 +146,10 @@ class CurrencyConfigs : BlinkConfigFolder<CurrencyConfig>(bukkitPlugin, "currenc
 
     override fun onCreateFolder(plugin: JavaPlugin, folderPath: String) {
         // 首次创建目录时释放默认货币配置
-        val folder = java.io.File(plugin.dataFolder, folderPath)
+        val folder = File(plugin.dataFolder, folderPath)
         for (name in defaults) {
             val resource = plugin.getResource("assets/${folderPath}$name") ?: continue
-            val target = java.io.File(folder, name)
+            val target = File(folder, name)
             if (!target.exists()) {
                 target.writeBytes(resource.readBytes())
             }
@@ -113,7 +162,8 @@ class CurrencyConfigs : BlinkConfigFolder<CurrencyConfig>(bukkitPlugin, "currenc
  */
 object CurrencyRegistry {
 
-    private val currencies = ConcurrentHashMap<String, Currency>()
+    @Volatile
+    private var currencies: Map<String, Currency> = emptyMap()
     private lateinit var configFolder: CurrencyConfigs
 
     /** 获取所有已注册货币 */
@@ -133,24 +183,42 @@ object CurrencyRegistry {
 
     /** 加载所有货币配置 */
     fun loadAll() {
-        currencies.clear()
-        configFolder = CurrencyConfigs()
-        configFolder.load()
+        val candidateFolder = CurrencyConfigs()
+        candidateFolder.load()
+        val loaded = linkedMapOf<String, Currency>()
 
-        for ((path, config) in configFolder.configs) {
+        for ((path, config) in candidateFolder.configs.toSortedMap()) {
             try {
                 val currency = config.toCurrency()
-                currencies[currency.id.lowercase()] = currency
+                val fileId = File(path).nameWithoutExtension.lowercase()
+                require(fileId.isBlank() || fileId == currency.id) {
+                    "文件名 '$fileId' 必须与货币 id '${currency.id}' 一致"
+                }
+                require(currency.id !in loaded) { "货币 id '${currency.id}' 重复" }
+                loaded[currency.id] = currency
                 BlinkLog.info("已加载货币 §b${currency.id} §f(${currency.displayName})")
             } catch (e: Exception) {
-                BlinkLog.warn("加载货币失败 $path: ${e.message}")
+                throw IllegalStateException("加载货币失败 $path: ${e.message}", e)
             }
         }
-        BlinkLog.info("已加载 §b${currencies.size} §f个货币")
+        require(loaded.isNotEmpty()) { "至少需要配置一种有效货币" }
+        require(loaded.values.count { it.vaultPrimary } <= 1) {
+            "只能配置一个 vault-primary=true 的货币"
+        }
+
+        configFolder = candidateFolder
+        currencies = loaded.toMap()
+        BlinkLog.info("已加载 §b${loaded.size} §f个货币")
     }
 
     /** 重载 */
     fun reload() {
         loadAll()
+    }
+
+    internal fun snapshot(): Map<String, Currency> = currencies
+
+    internal fun restore(snapshot: Map<String, Currency>) {
+        currencies = snapshot
     }
 }

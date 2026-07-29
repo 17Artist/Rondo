@@ -1,13 +1,33 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.placeholder
 
 import me.clip.placeholderapi.expansion.PlaceholderExpansion
 import org.bukkit.Bukkit
 import org.bukkit.OfflinePlayer
 import priv.seventeen.artist.blink.BlinkLog
+import priv.seventeen.artist.blink.bukkitPlugin
+import priv.seventeen.artist.rondo.account.AccountManager
+import priv.seventeen.artist.rondo.api.CurrencyEconomySnapshot
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
 import priv.seventeen.artist.rondo.ranking.RankingManager
 import java.math.RoundingMode
+import java.util.UUID
 
 /**
  * PlaceholderAPI 对接
@@ -15,6 +35,7 @@ import java.math.RoundingMode
 object PAPIHook {
 
     private var registered = false
+    private var expansion: RondoExpansion? = null
 
     fun hook() {
         if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") == null) {
@@ -22,13 +43,19 @@ object PAPIHook {
             return
         }
 
-        RondoExpansion().register()
-        registered = true
-        BlinkLog.info("PlaceholderAPI hooked.")
+        val candidate = RondoExpansion()
+        registered = candidate.register()
+        if (registered) {
+            expansion = candidate
+            BlinkLog.info("PlaceholderAPI hooked.")
+        } else {
+            BlinkLog.warn("PlaceholderAPI expansion registration failed.")
+        }
     }
 
     fun unhook() {
-        // PlaceholderAPI 会在插件卸载时自动注销
+        expansion?.unregister()
+        expansion = null
         registered = false
     }
 }
@@ -49,7 +76,7 @@ class RondoExpansion : PlaceholderExpansion() {
 
     override fun getIdentifier(): String = "rondo"
     override fun getAuthor(): String = "17Artist"
-    override fun getVersion(): String = "1.0.0"
+    override fun getVersion(): String = bukkitPlugin.description.version
     override fun persist(): Boolean = true
 
     override fun onRequest(player: OfflinePlayer?, params: String): String? {
@@ -60,32 +87,34 @@ class RondoExpansion : PlaceholderExpansion() {
             params.startsWith("balance_formatted_") -> {
                 val currencyId = params.removePrefix("balance_formatted_")
                 val currency = CurrencyRegistry.get(currencyId) ?: return null
-                val balance = RondoAPI.getBalance(player.uniqueId, currencyId)
-                currency.format(balance)
+                val data = getCachedCurrency(player.uniqueId, currencyId) ?: return "---"
+                currency.format(data.balance)
             }
             params.startsWith("balance_") -> {
                 val currencyId = params.removePrefix("balance_")
                 val currency = CurrencyRegistry.get(currencyId) ?: return null
-                val balance = RondoAPI.getBalance(player.uniqueId, currencyId)
-                balance.setScale(currency.decimalPlaces, RoundingMode.HALF_UP).toPlainString()
+                val data = getCachedCurrency(player.uniqueId, currencyId) ?: return "---"
+                data.balance.setScale(currency.decimalPlaces, RoundingMode.HALF_UP).toPlainString()
             }
 
             // %rondo_total_earned_<id>%
             params.startsWith("total_earned_") -> {
                 val currencyId = params.removePrefix("total_earned_")
                 val currency = CurrencyRegistry.get(currencyId) ?: return null
-                val account = priv.seventeen.artist.rondo.account.AccountManager.getAccount(player.uniqueId)
-                val data = account?.getBalanceData(currencyId)
-                data?.totalEarned?.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)?.toPlainString() ?: "0"
+                val data = getCachedCurrency(player.uniqueId, currencyId) ?: return "---"
+                data.totalEarned
+                    .setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
+                    .toPlainString()
             }
 
             // %rondo_total_spent_<id>%
             params.startsWith("total_spent_") -> {
                 val currencyId = params.removePrefix("total_spent_")
                 val currency = CurrencyRegistry.get(currencyId) ?: return null
-                val account = priv.seventeen.artist.rondo.account.AccountManager.getAccount(player.uniqueId)
-                val data = account?.getBalanceData(currencyId)
-                data?.totalSpent?.setScale(currency.decimalPlaces, RoundingMode.HALF_UP)?.toPlainString() ?: "0"
+                val data = getCachedCurrency(player.uniqueId, currencyId) ?: return "---"
+                data.totalSpent
+                    .setScale(currency.decimalPlaces, RoundingMode.HALF_UP)
+                    .toPlainString()
             }
 
             // %rondo_top_<id>_<rank>_name% / %rondo_top_<id>_<rank>_balance%
@@ -154,5 +183,13 @@ class RondoExpansion : PlaceholderExpansion() {
 
             else -> null
         }
+    }
+
+    private fun getCachedCurrency(
+        playerUuid: UUID,
+        currencyId: String
+    ): CurrencyEconomySnapshot? {
+        return AccountManager.getOrRequestEconomySnapshot(playerUuid)
+            ?.getCurrency(currencyId)
     }
 }

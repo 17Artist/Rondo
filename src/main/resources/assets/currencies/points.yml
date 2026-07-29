@@ -6,7 +6,7 @@
 id: points
 display-name: "点券"
 symbol: "P"
-color: "AQUA"
+color: "§b"
 description: "充值获取的高级货币"
 
 decimal-places: 0

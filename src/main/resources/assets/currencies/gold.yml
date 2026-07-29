@@ -6,7 +6,7 @@
 id: gold
 display-name: "金币"
 symbol: "G"
-color: "GOLD"
+color: "§6"
 description: "游戏内主要流通货币"
 
 decimal-places: 2

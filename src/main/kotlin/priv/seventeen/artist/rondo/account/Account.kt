@@ -1,6 +1,23 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.account
 
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
+import priv.seventeen.artist.rondo.currency.MoneyConstraints
 import priv.seventeen.artist.rondo.storage.BalanceData
 import java.math.BigDecimal
 import java.util.UUID
@@ -18,6 +35,7 @@ class Account(val playerUuid: UUID) {
         private set
 
     /** 加载余额数据 */
+    @Synchronized
     fun load(data: Map<String, BalanceData>) {
         balances.clear()
         // 统一使用 lowercase key
@@ -38,11 +56,13 @@ class Account(val playerUuid: UUID) {
     }
 
     /** 获取余额 */
+    @Synchronized
     fun getBalance(currencyId: String): BigDecimal {
         return balances[currencyId.lowercase()]?.balance ?: CurrencyRegistry.get(currencyId)?.defaultBalance ?: BigDecimal.ZERO
     }
 
     /** 获取余额数据 */
+    @Synchronized
     fun getBalanceData(currencyId: String): BalanceData {
         return balances[currencyId.lowercase()] ?: BalanceData(
             balance = CurrencyRegistry.get(currencyId)?.defaultBalance ?: BigDecimal.ZERO
@@ -50,6 +70,7 @@ class Account(val playerUuid: UUID) {
     }
 
     /** 获取所有余额 */
+    @Synchronized
     fun getAllBalances(): Map<String, BalanceData> = balances.toMap()
 
     /** 是否有足够余额 */
@@ -58,14 +79,18 @@ class Account(val playerUuid: UUID) {
     }
 
     /** 存入 */
+    @Synchronized
     fun deposit(currencyId: String, amount: BigDecimal): Boolean {
+        if (amount <= BigDecimal.ZERO) return false
         val currency = CurrencyRegistry.get(currencyId) ?: return false
         val key = currencyId.lowercase()
         val current = getBalanceData(currencyId)
         val newBalance = current.balance.add(amount)
 
         // 检查上限
-        if (currency.hasMaxBalance && newBalance > currency.maxBalance) {
+        if (!MoneyConstraints.isStorable(newBalance) ||
+            (currency.hasMaxBalance && newBalance > currency.maxBalance)
+        ) {
             return false
         }
 
@@ -78,28 +103,19 @@ class Account(val playerUuid: UUID) {
         return true
     }
 
-    /** 强制存入：不校验余额上限，仅用于回滚等必须恢复资金的场景 */
-    fun forceDeposit(currencyId: String, amount: BigDecimal): Boolean {
-        val key = currencyId.lowercase()
-        val current = getBalanceData(currencyId)
-        balances[key] = BalanceData(
-            balance = current.balance.add(amount),
-            totalEarned = current.totalEarned.add(amount),
-            totalSpent = current.totalSpent
-        )
-        dirty = true
-        return true
-    }
-
     /** 扣除 */
+    @Synchronized
     fun withdraw(currencyId: String, amount: BigDecimal): Boolean {
+        if (amount <= BigDecimal.ZERO) return false
         val currency = CurrencyRegistry.get(currencyId) ?: return false
         val key = currencyId.lowercase()
         val current = getBalanceData(currencyId)
         val newBalance = current.balance.subtract(amount)
 
         // 检查是否允许负数
-        if (!currency.negativeAllowed && newBalance < BigDecimal.ZERO) {
+        if (!MoneyConstraints.isStorable(newBalance) ||
+            (!currency.negativeAllowed && newBalance < BigDecimal.ZERO)
+        ) {
             return false
         }
 
@@ -113,7 +129,12 @@ class Account(val playerUuid: UUID) {
     }
 
     /** 设置余额 */
+    @Synchronized
     fun setBalance(currencyId: String, amount: BigDecimal): Boolean {
+        val currency = CurrencyRegistry.get(currencyId) ?: return false
+        if (!MoneyConstraints.isStorable(amount)) return false
+        if (!currency.negativeAllowed && amount < BigDecimal.ZERO) return false
+        if (currency.hasMaxBalance && amount > currency.maxBalance) return false
         val key = currencyId.lowercase()
         val current = getBalanceData(currencyId)
         balances[key] = BalanceData(
@@ -126,11 +147,13 @@ class Account(val playerUuid: UUID) {
     }
 
     /** 标记为已保存 */
+    @Synchronized
     fun markClean() {
         dirty = false
     }
 
     /** 标记为脏（保存失败时回滚用） */
+    @Synchronized
     fun markDirty() {
         dirty = true
     }
@@ -145,6 +168,7 @@ class Account(val playerUuid: UUID) {
     }
 
     /** 合并默认数据（加载期间已有内存操作时使用） */
+    @Synchronized
     fun mergeDefaults(dbData: Map<String, BalanceData>) {
         for ((currencyId, data) in dbData) {
             // 仅补充内存中不存在的货币
@@ -161,12 +185,14 @@ class Account(val playerUuid: UUID) {
     }
 
     /** 获取需要保存的数据 */
+    @Synchronized
     fun getDirtyEntries(): Map<String, BalanceData> {
         return if (dirty) balances.toMap() else emptyMap()
     }
 
-    /** 从 Redis 同步更新单个货币的缓存（跨服通知用） */
-    fun updateFromRedis(currencyId: String, data: BalanceData) {
+    /** 从共享存储同步更新单个货币的缓存（跨服通知用） */
+    @Synchronized
+    fun updateFromStorage(currencyId: String, data: BalanceData) {
         balances[currencyId.lowercase()] = data
     }
 }

@@ -6,7 +6,7 @@
 id: honor
 display-name: "荣誉点"
 symbol: "H"
-color: "LIGHT_PURPLE"
+color: "§d"
 description: "通过活动和成就获取的奖励货币"
 
 decimal-places: 0

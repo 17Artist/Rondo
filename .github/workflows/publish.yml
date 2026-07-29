@@ -8,10 +8,14 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - uses: gradle/actions/wrapper-validation@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -20,7 +24,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
@@ -35,5 +39,12 @@ jobs:
       - name: Publish to Maven repository
         env:
           repo: ${{ secrets.MAVEN_REPO_PASSWORD }}
-          BUILD_NUMBER: ${{ github.run_number }}
+          ORG_GRADLE_PROJECT_mavenRepoUser: ${{ secrets.MAVEN_REPO_USER }}
         run: ./gradlew deploy -Pversion=${{ steps.version.outputs.version }}
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rondo-${{ steps.version.outputs.version }}
+          path: build/libs/Rondo-${{ steps.version.outputs.version }}.jar
+          if-no-files-found: error

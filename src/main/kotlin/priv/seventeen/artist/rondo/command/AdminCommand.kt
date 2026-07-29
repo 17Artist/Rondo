@@ -1,11 +1,29 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.command
 
 import org.bukkit.Bukkit
+import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.blink.command.BlinkCommand
 import priv.seventeen.artist.blink.command.BlinkCommandRegistrar
 import priv.seventeen.artist.blink.command.CommandContext
 import priv.seventeen.artist.blink.command.SenderType
 import priv.seventeen.artist.blink.bukkitPlugin
+import priv.seventeen.artist.rondo.account.AccountManager
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.config.MainConfig
 import priv.seventeen.artist.rondo.config.MessageConfig
@@ -13,6 +31,7 @@ import priv.seventeen.artist.rondo.currency.CurrencyRegistry
 import priv.seventeen.artist.rondo.exchange.ExchangeManager
 import priv.seventeen.artist.rondo.log.TransactionLog
 import priv.seventeen.artist.rondo.ranking.RankingManager
+import priv.seventeen.artist.rondo.vault.VaultHook
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.SimpleDateFormat
@@ -273,15 +292,32 @@ object AdminCommand {
     }
 
     private fun handleReload(ctx: CommandContext) {
-        MainConfig.reload()
-        MessageConfig.reload()
-        CurrencyRegistry.reload()
-        ExchangeManager.reload()
-        // 异步刷新排行榜
-        Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, Runnable {
-            RankingManager.refreshAll()
-        })
-        ctx.reply(messages.reloadSuccess.replace("{prefix}", messages.prefix))
+        val previousMessages = MessageConfig.snapshot()
+        val previousCurrencies = CurrencyRegistry.snapshot()
+        val previousRules = ExchangeManager.snapshot()
+        try {
+            MessageConfig.reload()
+            CurrencyRegistry.reload()
+            ExchangeManager.reload()
+            AccountManager.rebuildOnlineSnapshots()
+            if (MainConfig.instance.features.vaultHook) {
+                VaultHook.hook()
+            }
+            Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, Runnable {
+                RankingManager.refreshAll()
+            })
+            ctx.reply(messages.reloadSuccess.replace("{prefix}", messages.prefix))
+        } catch (e: Exception) {
+            MessageConfig.restore(previousMessages)
+            CurrencyRegistry.restore(previousCurrencies)
+            ExchangeManager.restore(previousRules)
+            AccountManager.rebuildOnlineSnapshots()
+            if (MainConfig.instance.features.vaultHook) {
+                VaultHook.hook()
+            }
+            BlinkLog.warn("配置热重载失败，已恢复旧配置: ${e.message}")
+            ctx.reply("${messages.prefix}§c配置重载失败，旧配置已保留；请检查控制台")
+        }
     }
 
     private fun handleReset(ctx: CommandContext) {

@@ -1,24 +1,36 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.ranking
 
-import org.bukkit.Bukkit
 import org.bukkit.scheduler.BukkitRunnable
 import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.config.MainConfig
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
 import priv.seventeen.artist.rondo.storage.StorageManager
-import java.math.BigDecimal
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 排行榜管理器 — 定时刷新缓存
  */
 object RankingManager {
 
-    private val rankings = ConcurrentHashMap<String, List<RankingEntry>>()
-    /** 玩家名缓存，避免频繁调用 Bukkit.getOfflinePlayer */
-    private val nameCache = ConcurrentHashMap<UUID, String>()
+    @Volatile
+    private var rankings: Map<String, List<RankingEntry>> = emptyMap()
     private var rankingSize = 100
 
     fun initialize(config: MainConfig) {
@@ -35,7 +47,8 @@ object RankingManager {
 
     /** 获取排行榜 */
     fun getRanking(currencyId: String, page: Int, pageSize: Int): List<RankingEntry> {
-        val list = rankings[currencyId] ?: return emptyList()
+        if (page < 1 || pageSize !in 1..100) return emptyList()
+        val list = rankings[currencyId.lowercase()] ?: return emptyList()
         val start = (page - 1) * pageSize
         if (start >= list.size) return emptyList()
         val end = minOf(start + pageSize, list.size)
@@ -44,7 +57,8 @@ object RankingManager {
 
     /** 获取排行榜总页数 */
     fun getTotalPages(currencyId: String, pageSize: Int): Int {
-        val list = rankings[currencyId] ?: return 0
+        if (pageSize !in 1..100) return 0
+        val list = rankings[currencyId.lowercase()] ?: return 0
         return (list.size + pageSize - 1) / pageSize
     }
 
@@ -53,17 +67,13 @@ object RankingManager {
      * 若玩家不在缓存的前 rankingSize 名内，返回 null（视为未上榜）。
      */
     fun getPlayerRank(player: UUID, currencyId: String): Int? {
-        val list = rankings[currencyId] ?: return null
+        val list = rankings[currencyId.lowercase()] ?: return null
         return list.firstOrNull { it.playerUuid == player }?.rank
     }
 
     /** 刷新所有排行榜 */
     fun refreshAll() {
-        // 先刷新在线玩家名缓存
-        for (player in Bukkit.getOnlinePlayers()) {
-            nameCache[player.uniqueId] = player.name
-        }
-
+        val refreshed = linkedMapOf<String, List<RankingEntry>>()
         for (currency in CurrencyRegistry.getAll()) {
             if (!currency.rankingEnabled) continue
             try {
@@ -72,30 +82,22 @@ object RankingManager {
                     RankingEntry(
                         rank = index + 1,
                         playerUuid = rankingData.playerUuid,
-                        playerName = resolvePlayerName(rankingData.playerUuid),
+                        playerName = rankingData.playerName
+                            ?: rankingData.playerUuid.toString().substring(0, 8),
                         balance = rankingData.balance
                     )
                 }
-                rankings[currency.id] = entries
+                refreshed[currency.id] = entries
             } catch (e: Exception) {
                 BlinkLog.warn("Failed to refresh ranking for ${currency.id}: ${e.message}")
+                rankings[currency.id]?.let { refreshed[currency.id] = it }
             }
         }
-    }
-
-    /** 解析玩家名（优先缓存，避免网络请求） */
-    private fun resolvePlayerName(uuid: UUID): String {
-        nameCache[uuid]?.let { return it }
-        // 尝试从 Bukkit 获取（可能触发缓存查找，但不会发网络请求如果已缓存）
-        val name = Bukkit.getOfflinePlayer(uuid).name
-        if (name != null) {
-            nameCache[uuid] = name
-        }
-        return name ?: "Unknown"
+        rankings = refreshed.toMap()
     }
 
     /** 获取缓存的排行榜数据 */
     fun getCachedRanking(currencyId: String): List<RankingEntry> {
-        return rankings[currencyId] ?: emptyList()
+        return rankings[currencyId.lowercase()] ?: emptyList()
     }
 }

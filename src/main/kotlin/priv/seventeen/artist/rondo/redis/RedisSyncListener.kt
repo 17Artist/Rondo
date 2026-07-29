@@ -1,7 +1,22 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.redis
 
-import org.bukkit.scheduler.BukkitRunnable
-import priv.seventeen.artist.blink.bukkitPlugin
+import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.rondo.account.AccountManager
 import redis.clients.jedis.JedisPubSub
 import java.util.UUID
@@ -11,7 +26,13 @@ import java.util.UUID
  *
  * 消息格式: {serverId}:{uuid}:{currencyId}
  */
-class RedisSyncListener : JedisPubSub() {
+class RedisSyncListener(
+    private val subscribedCallback: () -> Unit = {}
+) : JedisPubSub() {
+
+    override fun onSubscribe(channel: String, subscribedChannels: Int) {
+        subscribedCallback()
+    }
 
     override fun onMessage(channel: String, message: String) {
         try {
@@ -25,19 +46,11 @@ class RedisSyncListener : JedisPubSub() {
             val uuid = try { UUID.fromString(parts[1]) } catch (_: Exception) { return }
             val currencyId = parts[2]
 
-            // 检查该玩家是否在本服在线
-            val account = AccountManager.getAccount(uuid) ?: return
-
-            // 从 Redis 读取最新余额，在主线程更新内存缓存
-            val balanceData = RedisEconomyProvider.getBalanceData(uuid, currencyId)
-
-            object : BukkitRunnable() {
-                override fun run() {
-                    account.updateFromRedis(currencyId, balanceData)
-                }
-            }.runTask(bukkitPlugin)
-        } catch (_: Exception) {
-            // 忽略解析错误，不影响订阅
+            // 共享 MySQL 是事实源；消息只负责让其他子服刷新在线缓存。
+            AccountManager.refreshFromStorage(uuid, currencyId)
+        } catch (e: Exception) {
+            // 订阅线程不能因单条坏消息或短暂数据库错误退出。
+            BlinkLog.warn("处理 Redis 同步通知失败: ${e.message}")
         }
     }
 }

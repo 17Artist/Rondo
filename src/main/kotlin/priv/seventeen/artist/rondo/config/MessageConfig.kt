@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.config
 
 import priv.seventeen.artist.blink.bukkitPlugin
@@ -82,9 +98,6 @@ class MessageConfig : BlinkConfig(bukkitPlugin, "messages") {
     @ConfigKey("error-invalid-amount")
     var errorInvalidAmount: String = "{prefix}§c\u2716 请输入有效的金额"
 
-    @ConfigKey("error-no-permission")
-    var errorNoPermission: String = "{prefix}§c\u2716 权限不足"
-
     @ConfigKey("reload-success")
     var reloadSuccess: String = "{prefix}§a\u2714 §f配置已重载"
 
@@ -103,7 +116,15 @@ class MessageConfig : BlinkConfig(bukkitPlugin, "messages") {
 
     companion object {
         lateinit var instance: MessageConfig private set
-        fun load() { instance = MessageConfig(); instance.load() }
-        fun reload() = instance.reload()
+        fun load() {
+            val candidate = MessageConfig()
+            candidate.load()
+            instance = candidate
+        }
+        fun reload() = load()
+        internal fun snapshot(): MessageConfig = instance
+        internal fun restore(snapshot: MessageConfig) {
+            instance = snapshot
+        }
     }
 }

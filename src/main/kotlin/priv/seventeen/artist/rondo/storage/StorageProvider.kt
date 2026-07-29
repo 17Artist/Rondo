@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.storage
 
 import priv.seventeen.artist.rondo.log.TransactionLog
@@ -28,12 +44,43 @@ interface StorageProvider {
 
     /**
      * 直接更新离线玩家余额（原子操作）
-     * @param maxBalance 余额上限，存入时若超过则拒绝；传 null 表示不校验上限（用于回滚等强制写入）
+     * @param maxBalance 余额上限，存入时若超过则拒绝；传 null 仅跳过业务上限，
+     * 仍受存储绝对边界约束
      */
-    fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean = false, maxBalance: BigDecimal? = null): Boolean
+    fun updateOfflineBalance(
+        playerUuid: UUID,
+        currencyId: String,
+        delta: BigDecimal,
+        source: String,
+        allowNegative: Boolean = false,
+        maxBalance: BigDecimal? = null,
+        initialBalance: BigDecimal = BigDecimal.ZERO
+    ): Boolean
+
+    /** 原子设置余额；保留累计获得/消耗统计。 */
+    fun setOfflineBalance(
+        playerUuid: UUID,
+        currencyId: String,
+        amount: BigDecimal
+    ): Boolean
 
     /** 获取离线玩家余额 */
     fun getOfflineBalance(playerUuid: UUID, currencyId: String): BalanceData?
+
+    /**
+     * 在一个存储事务中完成玩家间转账。
+     *
+     * 实现必须按稳定顺序锁定两条余额记录，避免相向转账死锁；失败时不得留下部分扣款。
+     */
+    fun transferBalances(request: TransferBalanceRequest): AtomicBalanceResult
+
+    /**
+     * 在一个存储事务中完成兑换、周期额度检查和兑换审计记录写入。
+     */
+    fun exchangeBalances(request: ExchangeBalanceRequest): AtomicBalanceResult
+
+    /** 记录玩家当前名称，供排行榜离线展示使用。 */
+    fun savePlayerName(playerUuid: UUID, playerName: String)
 
     // ===== 流水日志 =====
 
@@ -57,13 +104,6 @@ interface StorageProvider {
     /** 查询玩家排名 */
     fun queryPlayerRank(playerUuid: UUID, currencyId: String): Int?
 
-    // ===== 兑换记录 =====
-
-    /** 插入兑换记录 */
-    fun insertExchangeRecord(playerUuid: UUID, ruleId: String, amount: BigDecimal)
-
-    /** 查询周期内兑换总量 */
-    fun queryExchangeCount(playerUuid: UUID, ruleId: String, sinceTimestamp: Long): BigDecimal
 }
 
 /**
@@ -91,4 +131,42 @@ data class RankingData(
     val playerUuid: UUID,
     val playerName: String?,
     val balance: BigDecimal
+)
+
+enum class AtomicBalanceFailure {
+    INSUFFICIENT_FUNDS,
+    BALANCE_LIMIT,
+    PERIOD_LIMIT
+}
+
+data class AtomicBalanceResult(
+    val success: Boolean,
+    val failure: AtomicBalanceFailure? = null
+)
+
+data class TransferBalanceRequest(
+    val from: UUID,
+    val to: UUID,
+    val currencyId: String,
+    val debitAmount: BigDecimal,
+    val creditAmount: BigDecimal,
+    val allowNegative: Boolean,
+    val senderInitialBalance: BigDecimal,
+    val recipientInitialBalance: BigDecimal,
+    val recipientMaxBalance: BigDecimal?
+)
+
+data class ExchangeBalanceRequest(
+    val playerUuid: UUID,
+    val ruleId: String,
+    val fromCurrencyId: String,
+    val toCurrencyId: String,
+    val debitAmount: BigDecimal,
+    val creditAmount: BigDecimal,
+    val allowNegative: Boolean,
+    val fromInitialBalance: BigDecimal,
+    val toInitialBalance: BigDecimal,
+    val toMaxBalance: BigDecimal?,
+    val periodStart: Long?,
+    val periodLimit: BigDecimal?
 )

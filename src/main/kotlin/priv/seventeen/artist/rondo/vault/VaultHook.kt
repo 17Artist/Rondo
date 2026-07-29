@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.vault
 
 import net.milkbowl.vault.economy.AbstractEconomy
@@ -8,6 +24,7 @@ import org.bukkit.OfflinePlayer
 import org.bukkit.plugin.ServicePriority
 import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.blink.bukkitPlugin
+import priv.seventeen.artist.rondo.account.AccountManager
 import priv.seventeen.artist.rondo.api.RondoAPI
 import priv.seventeen.artist.rondo.currency.Currency
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
@@ -22,6 +39,7 @@ object VaultHook {
     private var economyInstance: RondoEconomy? = null
 
     fun hook() {
+        unhook()
         if (Bukkit.getPluginManager().getPlugin("Vault") == null) {
             BlinkLog.info("Vault not found, skipping hook.")
             return
@@ -61,7 +79,7 @@ object VaultHook {
  */
 class RondoEconomy(private val currency: Currency) : AbstractEconomy() {
 
-    override fun isEnabled(): Boolean = true
+    override fun isEnabled(): Boolean = bukkitPlugin.isEnabled
     override fun getName(): String = "Rondo"
     override fun hasBankSupport(): Boolean = false
     override fun fractionalDigits(): Int = currency.decimalPlaces
@@ -69,6 +87,7 @@ class RondoEconomy(private val currency: Currency) : AbstractEconomy() {
     override fun currencyNameSingular(): String = currency.displayName
 
     override fun format(amount: Double): String {
+        if (!amount.isFinite()) return amount.toString()
         return currency.format(BigDecimal.valueOf(amount))
     }
 
@@ -83,7 +102,7 @@ class RondoEconomy(private val currency: Currency) : AbstractEconomy() {
     override fun createPlayerAccount(playerName: String, worldName: String): Boolean = true
 
     override fun getBalance(player: OfflinePlayer): Double {
-        return RondoAPI.getBalance(player.uniqueId, currency.id).toDouble()
+        return currentBalance(player).toDouble()
     }
 
     @Suppress("DEPRECATION")
@@ -96,7 +115,8 @@ class RondoEconomy(private val currency: Currency) : AbstractEconomy() {
     override fun getBalance(playerName: String, world: String): Double = getBalance(playerName)
 
     override fun has(player: OfflinePlayer, amount: Double): Boolean {
-        return RondoAPI.hasBalance(player.uniqueId, currency.id, BigDecimal.valueOf(amount))
+        if (!amount.isFinite() || amount < 0) return false
+        return currentBalance(player) >= BigDecimal.valueOf(amount)
     }
 
     @Suppress("DEPRECATION")
@@ -109,7 +129,12 @@ class RondoEconomy(private val currency: Currency) : AbstractEconomy() {
     override fun has(playerName: String, world: String, amount: Double): Boolean = has(playerName, amount)
 
     override fun withdrawPlayer(player: OfflinePlayer, amount: Double): EconomyResponse {
-        if (amount < 0) return EconomyResponse(0.0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "Cannot withdraw negative amount")
+        if (!amount.isFinite() || amount < 0) {
+            return EconomyResponse(0.0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "Invalid amount")
+        }
+        if (amount == 0.0) {
+            return EconomyResponse(0.0, getBalance(player), EconomyResponse.ResponseType.SUCCESS, null)
+        }
         val success = RondoAPI.withdraw(player.uniqueId, currency.id, BigDecimal.valueOf(amount), "vault")
         val balance = getBalance(player)
         return if (success) {
@@ -129,7 +154,12 @@ class RondoEconomy(private val currency: Currency) : AbstractEconomy() {
     override fun withdrawPlayer(playerName: String, world: String, amount: Double): EconomyResponse = withdrawPlayer(playerName, amount)
 
     override fun depositPlayer(player: OfflinePlayer, amount: Double): EconomyResponse {
-        if (amount < 0) return EconomyResponse(0.0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "Cannot deposit negative amount")
+        if (!amount.isFinite() || amount < 0) {
+            return EconomyResponse(0.0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "Invalid amount")
+        }
+        if (amount == 0.0) {
+            return EconomyResponse(0.0, getBalance(player), EconomyResponse.ResponseType.SUCCESS, null)
+        }
         val success = RondoAPI.deposit(player.uniqueId, currency.id, BigDecimal.valueOf(amount), "vault")
         val balance = getBalance(player)
         return if (success) {
@@ -161,4 +191,11 @@ class RondoEconomy(private val currency: Currency) : AbstractEconomy() {
     override fun isBankMember(name: String, player: OfflinePlayer): EconomyResponse = EconomyResponse(0.0, 0.0, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "Banks not supported")
     override fun isBankMember(name: String, playerName: String): EconomyResponse = EconomyResponse(0.0, 0.0, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "Banks not supported")
     override fun getBanks(): MutableList<String> = mutableListOf()
+
+    private fun currentBalance(player: OfflinePlayer): BigDecimal {
+        val snapshot = AccountManager.peekEconomySnapshot(player.uniqueId)
+            ?: AccountManager.getOrLoadEconomySnapshot(player.uniqueId)
+        return snapshot.getBalance(currency.id)
+            ?: RondoAPI.getBalance(player.uniqueId, currency.id)
+    }
 }

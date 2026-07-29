@@ -1,32 +1,66 @@
+/*
+ * Copyright 2026 17Artist
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package priv.seventeen.artist.rondo.storage
 
 import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.log.TransactionLog
+import priv.seventeen.artist.rondo.currency.MoneyConstraints
 import java.io.File
 import java.math.BigDecimal
 import java.sql.Connection
 import java.sql.DriverManager
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 /**
  * SQLite 存储实现
  */
-class SQLiteProvider : StorageProvider {
+class SQLiteProvider(
+    private val configuredDatabaseFile: File? = null,
+    private val logInitialization: Boolean = true
+) : StorageProvider {
 
     private lateinit var connection: Connection
+    private lateinit var databaseFile: File
     private val lock = Any()
 
+    private val timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
     override fun initialize() {
-        val dbFile = File(bukkitPlugin.dataFolder, "data.db")
-        if (!dbFile.parentFile.exists()) dbFile.parentFile.mkdirs()
-        connection = DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}")
+        databaseFile = configuredDatabaseFile ?: File(bukkitPlugin.dataFolder, "data.db")
+        val parent = databaseFile.parentFile
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            error("无法创建 SQLite 数据目录: ${parent.absolutePath}")
+        }
+        connection = DriverManager.getConnection("jdbc:sqlite:${databaseFile.absolutePath}")
         connection.createStatement().use { stmt ->
             stmt.executeUpdate("PRAGMA journal_mode=WAL")
             stmt.executeUpdate("PRAGMA synchronous=NORMAL")
+            stmt.executeUpdate("PRAGMA busy_timeout=5000")
+            stmt.executeUpdate("PRAGMA foreign_keys=ON")
         }
         createTables()
-        BlinkLog.info("SQLite storage initialized.")
+        if (logInitialization) {
+            BlinkLog.info("SQLite storage initialized.")
+        }
     }
 
     override fun shutdown() {
@@ -40,8 +74,7 @@ class SQLiteProvider : StorageProvider {
     private fun getConnection(): Connection {
         synchronized(lock) {
             if (connection.isClosed) {
-                val dbFile = File(bukkitPlugin.dataFolder, "data.db")
-                connection = DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}")
+                connection = DriverManager.getConnection("jdbc:sqlite:${databaseFile.absolutePath}")
             }
             return connection
         }
@@ -93,6 +126,24 @@ class SQLiteProvider : StorageProvider {
                 stmt.executeUpdate("""
                     CREATE INDEX IF NOT EXISTS idx_exchange_player_rule ON rondo_exchange_record (player_uuid, rule_id, created_at)
                 """.trimIndent())
+
+                stmt.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS rondo_exchange_quota (
+                        player_uuid TEXT NOT NULL,
+                        rule_id     TEXT NOT NULL,
+                        period_start INTEGER NOT NULL,
+                        amount      TEXT NOT NULL DEFAULT '0',
+                        PRIMARY KEY (player_uuid, rule_id, period_start)
+                    )
+                """.trimIndent())
+
+                stmt.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS rondo_player (
+                        player_uuid TEXT PRIMARY KEY,
+                        player_name TEXT NOT NULL,
+                        updated_at  TEXT DEFAULT (datetime('now'))
+                    )
+                """.trimIndent())
             }
         }
     }
@@ -117,10 +168,16 @@ class SQLiteProvider : StorageProvider {
     }
 
     override fun saveBalance(playerUuid: UUID, currencyId: String, data: BalanceData) {
+        requireValidBalanceData(data)
         synchronized(lock) {
             getConnection().prepareStatement("""
-                INSERT OR REPLACE INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
+                INSERT INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
                 VALUES (?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(player_uuid, currency_id) DO UPDATE SET
+                    balance = excluded.balance,
+                    total_earned = excluded.total_earned,
+                    total_spent = excluded.total_spent,
+                    updated_at = datetime('now')
             """.trimIndent()).use { ps ->
                 ps.setString(1, playerUuid.toString())
                 ps.setString(2, currencyId)
@@ -134,13 +191,19 @@ class SQLiteProvider : StorageProvider {
 
     override fun saveBalancesBatch(entries: List<BalanceEntry>) {
         if (entries.isEmpty()) return
+        entries.forEach { requireValidBalanceData(it.data) }
         synchronized(lock) {
             val conn = getConnection()
             conn.autoCommit = false
             try {
                 conn.prepareStatement("""
-                    INSERT OR REPLACE INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
+                    INSERT INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
                     VALUES (?, ?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(player_uuid, currency_id) DO UPDATE SET
+                        balance = excluded.balance,
+                        total_earned = excluded.total_earned,
+                        total_spent = excluded.total_spent,
+                        updated_at = datetime('now')
                 """.trimIndent()).use { ps ->
                     for (entry in entries) {
                         ps.setString(1, entry.playerUuid.toString())
@@ -162,7 +225,15 @@ class SQLiteProvider : StorageProvider {
         }
     }
 
-    override fun updateOfflineBalance(playerUuid: UUID, currencyId: String, delta: BigDecimal, source: String, allowNegative: Boolean, maxBalance: BigDecimal?): Boolean {
+    override fun updateOfflineBalance(
+        playerUuid: UUID,
+        currencyId: String,
+        delta: BigDecimal,
+        source: String,
+        allowNegative: Boolean,
+        maxBalance: BigDecimal?,
+        initialBalance: BigDecimal
+    ): Boolean {
         synchronized(lock) {
             val conn = getConnection()
             conn.autoCommit = false
@@ -170,10 +241,11 @@ class SQLiteProvider : StorageProvider {
                 // 确保记录存在
                 conn.prepareStatement("""
                     INSERT OR IGNORE INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent)
-                    VALUES (?, ?, '0', '0', '0')
+                    VALUES (?, ?, ?, '0', '0')
                 """.trimIndent()).use { ps ->
                     ps.setString(1, playerUuid.toString())
                     ps.setString(2, currencyId)
+                    ps.setString(3, initialBalance.toPlainString())
                     ps.executeUpdate()
                 }
 
@@ -195,7 +267,9 @@ class SQLiteProvider : StorageProvider {
 
                 // 检查余额是否足够（扣款时）
                 val newBalance = current.add(delta)
-                if (delta < BigDecimal.ZERO && newBalance < BigDecimal.ZERO && !allowNegative) {
+                if (!MoneyConstraints.isStorable(newBalance) ||
+                    (delta < BigDecimal.ZERO && newBalance < BigDecimal.ZERO && !allowNegative)
+                ) {
                     conn.rollback()
                     return false
                 }
@@ -208,6 +282,12 @@ class SQLiteProvider : StorageProvider {
                 // 更新余额
                 val newEarned = if (delta >= BigDecimal.ZERO) earned.add(delta) else earned
                 val newSpent = if (delta < BigDecimal.ZERO) spent.add(delta.abs()) else spent
+                if (!MoneyConstraints.isCumulativeStorable(newEarned) ||
+                    !MoneyConstraints.isCumulativeStorable(newSpent)
+                ) {
+                    conn.rollback()
+                    return false
+                }
 
                 conn.prepareStatement("""
                     UPDATE rondo_balance SET balance = ?, total_earned = ?, total_spent = ?, updated_at = datetime('now')
@@ -227,6 +307,326 @@ class SQLiteProvider : StorageProvider {
                 throw e
             } finally {
                 conn.autoCommit = true
+            }
+        }
+    }
+
+    override fun setOfflineBalance(
+        playerUuid: UUID,
+        currencyId: String,
+        amount: BigDecimal
+    ): Boolean {
+        synchronized(lock) {
+            getConnection().prepareStatement("""
+                INSERT INTO rondo_balance
+                    (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
+                VALUES (?, ?, ?, '0', '0', datetime('now'))
+                ON CONFLICT(player_uuid, currency_id) DO UPDATE
+                SET balance = excluded.balance, updated_at = datetime('now')
+            """.trimIndent()).use { ps ->
+                ps.setString(1, playerUuid.toString())
+                ps.setString(2, currencyId)
+                ps.setString(3, amount.toPlainString())
+                return ps.executeUpdate() == 1
+            }
+        }
+    }
+
+    override fun transferBalances(request: TransferBalanceRequest): AtomicBalanceResult {
+        require(request.from != request.to) { "转账双方不能相同" }
+        synchronized(lock) {
+            val conn = getConnection()
+            conn.autoCommit = false
+            try {
+                ensureBalanceRow(conn, request.from, request.currencyId, request.senderInitialBalance)
+                ensureBalanceRow(conn, request.to, request.currencyId, request.recipientInitialBalance)
+
+                val fromData = readBalance(conn, request.from, request.currencyId)
+                val toData = readBalance(conn, request.to, request.currencyId)
+                val fromAfter = fromData.balance.subtract(request.debitAmount)
+                val toAfter = toData.balance.add(request.creditAmount)
+
+                if (!MoneyConstraints.isStorable(fromAfter) ||
+                    (!request.allowNegative && fromAfter < BigDecimal.ZERO)
+                ) {
+                    conn.rollback()
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.INSUFFICIENT_FUNDS)
+                }
+                if (!MoneyConstraints.isStorable(toAfter) ||
+                    (request.recipientMaxBalance != null && toAfter > request.recipientMaxBalance)
+                ) {
+                    conn.rollback()
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
+                }
+                if (!MoneyConstraints.isCumulativeStorable(
+                        fromData.totalSpent.add(request.debitAmount)
+                    ) ||
+                    !MoneyConstraints.isCumulativeStorable(
+                        toData.totalEarned.add(request.creditAmount)
+                    )
+                ) {
+                    conn.rollback()
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
+                }
+
+                writeBalance(
+                    conn,
+                    request.from,
+                    request.currencyId,
+                    fromData.copy(
+                        balance = fromAfter,
+                        totalSpent = fromData.totalSpent.add(request.debitAmount)
+                    )
+                )
+                writeBalance(
+                    conn,
+                    request.to,
+                    request.currencyId,
+                    toData.copy(
+                        balance = toAfter,
+                        totalEarned = toData.totalEarned.add(request.creditAmount)
+                    )
+                )
+                conn.commit()
+                return AtomicBalanceResult(true)
+            } catch (e: Exception) {
+                conn.rollback()
+                throw e
+            } finally {
+                conn.autoCommit = true
+            }
+        }
+    }
+
+    override fun exchangeBalances(request: ExchangeBalanceRequest): AtomicBalanceResult {
+        require(request.fromCurrencyId != request.toCurrencyId) { "兑换货币不能相同" }
+        synchronized(lock) {
+            val conn = getConnection()
+            conn.autoCommit = false
+            try {
+                ensureBalanceRow(conn, request.playerUuid, request.fromCurrencyId, request.fromInitialBalance)
+                ensureBalanceRow(conn, request.playerUuid, request.toCurrencyId, request.toInitialBalance)
+
+                val fromData = readBalance(conn, request.playerUuid, request.fromCurrencyId)
+                val toData = readBalance(conn, request.playerUuid, request.toCurrencyId)
+                val fromAfter = fromData.balance.subtract(request.debitAmount)
+                val toAfter = toData.balance.add(request.creditAmount)
+
+                if (!MoneyConstraints.isStorable(fromAfter) ||
+                    (!request.allowNegative && fromAfter < BigDecimal.ZERO)
+                ) {
+                    conn.rollback()
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.INSUFFICIENT_FUNDS)
+                }
+                if (!MoneyConstraints.isStorable(toAfter) ||
+                    (request.toMaxBalance != null && toAfter > request.toMaxBalance)
+                ) {
+                    conn.rollback()
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
+                }
+                if (!MoneyConstraints.isCumulativeStorable(
+                        fromData.totalSpent.add(request.debitAmount)
+                    ) ||
+                    !MoneyConstraints.isCumulativeStorable(
+                        toData.totalEarned.add(request.creditAmount)
+                    )
+                ) {
+                    conn.rollback()
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
+                }
+
+                if (request.periodStart != null && request.periodLimit != null) {
+                    val used = lockAndReadExchangeQuota(conn, request)
+                    if (used.add(request.creditAmount) > request.periodLimit) {
+                        conn.rollback()
+                        return AtomicBalanceResult(false, AtomicBalanceFailure.PERIOD_LIMIT)
+                    }
+                    conn.prepareStatement("""
+                        UPDATE rondo_exchange_quota SET amount = ?
+                        WHERE player_uuid = ? AND rule_id = ? AND period_start = ?
+                    """.trimIndent()).use { ps ->
+                        ps.setString(1, used.add(request.creditAmount).toPlainString())
+                        ps.setString(2, request.playerUuid.toString())
+                        ps.setString(3, request.ruleId)
+                        ps.setLong(4, request.periodStart)
+                        ps.executeUpdate()
+                    }
+                }
+
+                writeBalance(
+                    conn,
+                    request.playerUuid,
+                    request.fromCurrencyId,
+                    fromData.copy(
+                        balance = fromAfter,
+                        totalSpent = fromData.totalSpent.add(request.debitAmount)
+                    )
+                )
+                writeBalance(
+                    conn,
+                    request.playerUuid,
+                    request.toCurrencyId,
+                    toData.copy(
+                        balance = toAfter,
+                        totalEarned = toData.totalEarned.add(request.creditAmount)
+                    )
+                )
+                conn.prepareStatement("""
+                    INSERT INTO rondo_exchange_record (player_uuid, rule_id, amount, created_at)
+                    VALUES (?, ?, ?, datetime('now'))
+                """.trimIndent()).use { ps ->
+                    ps.setString(1, request.playerUuid.toString())
+                    ps.setString(2, request.ruleId)
+                    ps.setString(3, request.creditAmount.toPlainString())
+                    ps.executeUpdate()
+                }
+                conn.commit()
+                return AtomicBalanceResult(true)
+            } catch (e: Exception) {
+                conn.rollback()
+                throw e
+            } finally {
+                conn.autoCommit = true
+            }
+        }
+    }
+
+    private fun ensureBalanceRow(
+        conn: Connection,
+        playerUuid: UUID,
+        currencyId: String,
+        initialBalance: BigDecimal
+    ) {
+        conn.prepareStatement("""
+            INSERT OR IGNORE INTO rondo_balance
+                (player_uuid, currency_id, balance, total_earned, total_spent)
+            VALUES (?, ?, ?, '0', '0')
+        """.trimIndent()).use { ps ->
+            ps.setString(1, playerUuid.toString())
+            ps.setString(2, currencyId)
+            ps.setString(3, initialBalance.toPlainString())
+            ps.executeUpdate()
+        }
+    }
+
+    private fun readBalance(conn: Connection, playerUuid: UUID, currencyId: String): BalanceData {
+        conn.prepareStatement("""
+            SELECT balance, total_earned, total_spent
+            FROM rondo_balance WHERE player_uuid = ? AND currency_id = ?
+        """.trimIndent()).use { ps ->
+            ps.setString(1, playerUuid.toString())
+            ps.setString(2, currencyId)
+            ps.executeQuery().use { rs ->
+                check(rs.next()) { "余额记录初始化失败: $playerUuid/$currencyId" }
+                return BalanceData(
+                    balance = BigDecimal(rs.getString("balance")),
+                    totalEarned = BigDecimal(rs.getString("total_earned")),
+                    totalSpent = BigDecimal(rs.getString("total_spent"))
+                )
+            }
+        }
+    }
+
+    private fun writeBalance(
+        conn: Connection,
+        playerUuid: UUID,
+        currencyId: String,
+        data: BalanceData
+    ) {
+        requireValidBalanceData(data)
+        conn.prepareStatement("""
+            UPDATE rondo_balance
+            SET balance = ?, total_earned = ?, total_spent = ?, updated_at = datetime('now')
+            WHERE player_uuid = ? AND currency_id = ?
+        """.trimIndent()).use { ps ->
+            ps.setString(1, data.balance.toPlainString())
+            ps.setString(2, data.totalEarned.toPlainString())
+            ps.setString(3, data.totalSpent.toPlainString())
+            ps.setString(4, playerUuid.toString())
+            ps.setString(5, currencyId)
+            check(ps.executeUpdate() == 1) { "余额记录更新失败: $playerUuid/$currencyId" }
+        }
+    }
+
+    private fun requireValidBalanceData(data: BalanceData) {
+        require(MoneyConstraints.isStorable(data.balance)) {
+            "余额超出 DECIMAL(20,4) 可存储范围"
+        }
+        require(MoneyConstraints.isCumulativeStorable(data.totalEarned)) {
+            "累计获得超出 DECIMAL(38,4) 兼容范围"
+        }
+        require(MoneyConstraints.isCumulativeStorable(data.totalSpent)) {
+            "累计消耗超出 DECIMAL(38,4) 兼容范围"
+        }
+    }
+
+    private fun lockAndReadExchangeQuota(
+        conn: Connection,
+        request: ExchangeBalanceRequest
+    ): BigDecimal {
+        val inserted = conn.prepareStatement("""
+            INSERT OR IGNORE INTO rondo_exchange_quota
+                (player_uuid, rule_id, period_start, amount)
+            VALUES (?, ?, ?, '0')
+        """.trimIndent()).use { ps ->
+            ps.setString(1, request.playerUuid.toString())
+            ps.setString(2, request.ruleId)
+            ps.setLong(3, request.periodStart!!)
+            ps.executeUpdate() == 1
+        }
+
+        if (inserted) {
+            var historical = BigDecimal.ZERO
+            conn.prepareStatement("""
+                SELECT amount FROM rondo_exchange_record
+                WHERE player_uuid = ? AND rule_id = ? AND created_at >= datetime(? / 1000, 'unixepoch')
+            """.trimIndent()).use { ps ->
+                ps.setString(1, request.playerUuid.toString())
+                ps.setString(2, request.ruleId)
+                ps.setLong(3, request.periodStart!!)
+                ps.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        historical = historical.add(BigDecimal(rs.getString("amount")))
+                    }
+                }
+            }
+            conn.prepareStatement("""
+                UPDATE rondo_exchange_quota SET amount = ?
+                WHERE player_uuid = ? AND rule_id = ? AND period_start = ?
+            """.trimIndent()).use { ps ->
+                ps.setString(1, historical.toPlainString())
+                ps.setString(2, request.playerUuid.toString())
+                ps.setString(3, request.ruleId)
+                ps.setLong(4, request.periodStart!!)
+                ps.executeUpdate()
+            }
+        }
+
+        conn.prepareStatement("""
+            SELECT amount FROM rondo_exchange_quota
+            WHERE player_uuid = ? AND rule_id = ? AND period_start = ?
+        """.trimIndent()).use { ps ->
+            ps.setString(1, request.playerUuid.toString())
+            ps.setString(2, request.ruleId)
+            ps.setLong(3, request.periodStart!!)
+            ps.executeQuery().use { rs ->
+                check(rs.next()) { "兑换额度记录初始化失败" }
+                return BigDecimal(rs.getString("amount"))
+            }
+        }
+    }
+
+    override fun savePlayerName(playerUuid: UUID, playerName: String) {
+        synchronized(lock) {
+            getConnection().prepareStatement("""
+                INSERT INTO rondo_player (player_uuid, player_name, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(player_uuid) DO UPDATE
+                SET player_name = excluded.player_name, updated_at = datetime('now')
+            """.trimIndent()).use { ps ->
+                ps.setString(1, playerUuid.toString())
+                ps.setString(2, playerName)
+                ps.executeUpdate()
             }
         }
     }
@@ -263,7 +663,7 @@ class SQLiteProvider : StorageProvider {
                 ps.setString(5, log.balanceAfter.toPlainString())
                 ps.setString(6, log.source)
                 ps.setString(7, log.detail)
-                ps.setString(8, java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date(log.timestamp)))
+                ps.setString(8, formatTimestamp(log.timestamp))
                 ps.executeUpdate()
             }
         }
@@ -279,7 +679,6 @@ class SQLiteProvider : StorageProvider {
                     INSERT INTO rondo_log (player_uuid, currency_id, action, amount, balance, source, detail, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()).use { ps ->
-                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                     for (log in logs) {
                         ps.setString(1, log.playerUuid.toString())
                         ps.setString(2, log.currencyId)
@@ -288,7 +687,7 @@ class SQLiteProvider : StorageProvider {
                         ps.setString(5, log.balanceAfter.toPlainString())
                         ps.setString(6, log.source)
                         ps.setString(7, log.detail)
-                        ps.setString(8, sdf.format(java.util.Date(log.timestamp)))
+                        ps.setString(8, formatTimestamp(log.timestamp))
                         ps.addBatch()
                     }
                     ps.executeBatch()
@@ -318,10 +717,9 @@ class SQLiteProvider : StorageProvider {
                 ps.setInt(idx++, pageSize)
                 ps.setInt(idx, (page - 1) * pageSize)
                 ps.executeQuery().use { rs ->
-                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                     while (rs.next()) {
                         val timeStr = rs.getString("created_at")
-                        val time = try { sdf.parse(timeStr)?.time ?: 0L } catch (_: Exception) { 0L }
+                        val time = parseTimestamp(timeStr)
                         result.add(TransactionLog(
                             playerUuid = UUID.fromString(rs.getString("player_uuid")),
                             currencyId = rs.getString("currency_id"),
@@ -355,14 +753,18 @@ class SQLiteProvider : StorageProvider {
     override fun queryRanking(currencyId: String, limit: Int): List<RankingData> {
         val result = mutableListOf<RankingData>()
         synchronized(lock) {
-            getConnection().prepareStatement("SELECT player_uuid, balance FROM rondo_balance WHERE currency_id = ? ORDER BY CAST(balance AS REAL) DESC LIMIT ?").use { ps ->
+            getConnection().prepareStatement("""
+                SELECT b.player_uuid, b.balance, p.player_name
+                FROM rondo_balance b
+                LEFT JOIN rondo_player p ON p.player_uuid = b.player_uuid
+                WHERE b.currency_id = ?
+            """.trimIndent()).use { ps ->
                 ps.setString(1, currencyId)
-                ps.setInt(2, limit)
                 ps.executeQuery().use { rs ->
                     while (rs.next()) {
                         result.add(RankingData(
                             playerUuid = UUID.fromString(rs.getString("player_uuid")),
-                            playerName = null,
+                            playerName = rs.getString("player_name"),
                             balance = BigDecimal(rs.getString("balance") ?: "0")
                         ))
                     }
@@ -370,51 +772,26 @@ class SQLiteProvider : StorageProvider {
             }
         }
         return result
+            .sortedWith(compareByDescending<RankingData> { it.balance }.thenBy { it.playerUuid })
+            .take(limit.coerceAtLeast(0))
     }
 
     override fun queryPlayerRank(playerUuid: UUID, currencyId: String): Int? {
-        synchronized(lock) {
-            getConnection().prepareStatement("""
-                SELECT COUNT(*) + 1 AS rank FROM rondo_balance 
-                WHERE currency_id = ? AND CAST(balance AS REAL) > (
-                    SELECT COALESCE(CAST(balance AS REAL), 0) FROM rondo_balance WHERE player_uuid = ? AND currency_id = ?
-                )
-            """.trimIndent()).use { ps ->
-                ps.setString(1, currencyId)
-                ps.setString(2, playerUuid.toString())
-                ps.setString(3, currencyId)
-                ps.executeQuery().use { rs ->
-                    if (rs.next()) return rs.getInt("rank")
-                }
-            }
-        }
-        return null
+        val all = queryRanking(currencyId, Int.MAX_VALUE)
+        val index = all.indexOfFirst { it.playerUuid == playerUuid }
+        return if (index >= 0) index + 1 else null
     }
 
-    override fun insertExchangeRecord(playerUuid: UUID, ruleId: String, amount: BigDecimal) {
-        synchronized(lock) {
-            getConnection().prepareStatement("INSERT INTO rondo_exchange_record (player_uuid, rule_id, amount) VALUES (?, ?, ?)").use { ps ->
-                ps.setString(1, playerUuid.toString())
-                ps.setString(2, ruleId)
-                ps.setString(3, amount.toPlainString())
-                ps.executeUpdate()
-            }
-        }
+    private fun formatTimestamp(timestamp: Long): String {
+        return timestampFormatter.format(Instant.ofEpochMilli(timestamp).atOffset(ZoneOffset.UTC))
     }
 
-    override fun queryExchangeCount(playerUuid: UUID, ruleId: String, sinceTimestamp: Long): BigDecimal {
-        synchronized(lock) {
-            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-            val sinceStr = sdf.format(java.util.Date(sinceTimestamp))
-            getConnection().prepareStatement("SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) AS total FROM rondo_exchange_record WHERE player_uuid = ? AND rule_id = ? AND created_at >= ?").use { ps ->
-                ps.setString(1, playerUuid.toString())
-                ps.setString(2, ruleId)
-                ps.setString(3, sinceStr)
-                ps.executeQuery().use { rs ->
-                    if (rs.next()) return BigDecimal(rs.getString("total") ?: "0")
-                }
-            }
+    private fun parseTimestamp(value: String?): Long {
+        if (value.isNullOrBlank()) return 0L
+        return try {
+            LocalDateTime.parse(value, timestampFormatter).toInstant(ZoneOffset.UTC).toEpochMilli()
+        } catch (_: Exception) {
+            0L
         }
-        return BigDecimal.ZERO
     }
 }
