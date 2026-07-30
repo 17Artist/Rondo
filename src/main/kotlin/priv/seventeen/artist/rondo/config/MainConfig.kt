@@ -69,7 +69,6 @@ class MainConfig : BlinkConfig(bukkitPlugin, "config") {
             )) { "storage.mysql.ssl-mode 值无效" }
         }
 
-        require(performance.saveInterval >= 20) { "performance.save-interval 不能小于 20 tick" }
         require(performance.logQueueSize in 100..100_000) {
             "performance.log-queue-size 必须在 100..100000 之间"
         }
@@ -117,10 +116,6 @@ class StorageSection : BlinkSection() {
     @Comment("存储类型: sqlite / mysql")
     var type: String = "sqlite"
 
-    @ConfigKey("write-through")
-    @Comment("单服模式是否每次变更立即落库；生产环境建议保持 true")
-    var writeThrough: Boolean = true
-
     @Comment("MySQL 配置")
     var mysql: MySQLSection = MySQLSection()
 }
@@ -129,7 +124,7 @@ class MySQLSection : BlinkSection() {
     var host: String = "localhost"
     var port: Int = 3306
     var database: String = "rondo"
-    var username: String = "root"
+    var username: String = "rondo"
     var password: String = ""
 
     @ConfigKey("ssl-mode")
@@ -146,10 +141,6 @@ class MySQLSection : BlinkSection() {
 }
 
 class PerformanceSection : BlinkSection() {
-    @ConfigKey("save-interval")
-    @Comment("批量保存间隔 (tick, 100=5秒)")
-    var saveInterval: Int = 100
-
     @ConfigKey("log-queue-size")
     @Comment("日志队列大小")
     var logQueueSize: Int = 1000

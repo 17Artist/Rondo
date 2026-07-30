@@ -9,6 +9,8 @@ build/
 
 # Node
 node_modules/
+.runtime/
+qa/runtime/protocol/node_modules/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 
@@ -19,3 +21,5 @@ Thumbs.db
 # Build output
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+/qa/
+/scripts/

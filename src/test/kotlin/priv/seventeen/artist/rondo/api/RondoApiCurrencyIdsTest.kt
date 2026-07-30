@@ -17,6 +17,7 @@
 package priv.seventeen.artist.rondo.api
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 import priv.seventeen.artist.rondo.currency.Currency
 import priv.seventeen.artist.rondo.currency.CurrencyRegistry
@@ -41,6 +42,23 @@ class RondoApiCurrencyIdsTest {
             CurrencyRegistry.restore(mapOf("honor" to currency("honor")))
             assertEquals(linkedSetOf("gold", "points"), ids)
             assertEquals(setOf("honor"), RondoAPI.getAllCurrencyIds())
+        } finally {
+            CurrencyRegistry.restore(original)
+        }
+    }
+
+    @Test
+    fun `has balance rejects an unregistered currency even for zero amount`() {
+        val original = CurrencyRegistry.snapshot()
+        try {
+            CurrencyRegistry.restore(emptyMap())
+            assertFalse(
+                RondoAPI.hasBalance(
+                    java.util.UUID.randomUUID(),
+                    "missing",
+                    BigDecimal.ZERO
+                )
+            )
         } finally {
             CurrencyRegistry.restore(original)
         }

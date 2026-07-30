@@ -16,7 +16,9 @@
 
 package priv.seventeen.artist.rondo.redis
 
+import org.bukkit.scheduler.BukkitRunnable
 import priv.seventeen.artist.blink.BlinkLog
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.account.AccountManager
 import priv.seventeen.artist.rondo.config.MainConfig
 import redis.clients.jedis.DefaultJedisClientConfig
@@ -30,6 +32,8 @@ import java.util.UUID
  * Redis 连接池管理 + Pub/Sub
  */
 object RedisManager {
+
+    private const val MAX_PUBLISH_ATTEMPTS = 5
 
     private lateinit var pool: JedisPool
     private var subThread: Thread? = null
@@ -78,7 +82,9 @@ object RedisManager {
             candidatePool.resource.use { it.ping() }
             pool = candidatePool
             running = true
-            BlinkLog.success("Redis 已连接 §7(${redis.host}:${redis.port}, id=$serverId)")
+            BlinkLog.success(
+                "[redis-connected] Redis 已连接 §7(${redis.host}:${redis.port}, id=$serverId)"
+            )
         } catch (e: Exception) {
             candidatePool.close()
             BlinkLog.error("Redis 连接失败: ${e.message}")
@@ -91,11 +97,42 @@ object RedisManager {
 
     /** 发布同步消息，格式: {serverId}:{uuid}:{currencyId} */
     fun publishSync(playerUuid: UUID, currencyId: String) {
+        if (!isEnabled) return
         val message = "$serverId:$playerUuid:$currencyId"
+        schedulePublish(message, attempt = 1, delayTicks = 0L)
+    }
+
+    private fun schedulePublish(message: String, attempt: Int, delayTicks: Long) {
+        if (!running) return
+        val task = object : BukkitRunnable() {
+            override fun run() {
+                if (!running || !::pool.isInitialized || pool.isClosed) return
+                try {
+                    pool.resource.use { it.publish(channel, message) }
+                } catch (e: Exception) {
+                    if (!running) return
+                    if (attempt < MAX_PUBLISH_ATTEMPTS) {
+                        val retryDelay = (20L shl (attempt - 1)).coerceAtMost(160L)
+                        schedulePublish(message, attempt + 1, retryDelay)
+                    } else {
+                        BlinkLog.warn(
+                            "Redis publish 连续 $MAX_PUBLISH_ATTEMPTS 次失败，" +
+                                "远端缓存将等待后续通知或重连校准: ${e.message}"
+                        )
+                    }
+                }
+            }
+        }
         try {
-            pool.resource.use { it.publish(channel, message) }
+            if (delayTicks <= 0L) {
+                task.runTaskAsynchronously(bukkitPlugin)
+            } else {
+                task.runTaskLaterAsynchronously(bukkitPlugin, delayTicks)
+            }
         } catch (e: Exception) {
-            BlinkLog.warn("Redis publish 失败: ${e.message}")
+            if (running) {
+                BlinkLog.warn("无法调度 Redis publish 任务: ${e.message}")
+            }
         }
     }
 
@@ -123,7 +160,10 @@ object RedisManager {
                     retryMillis = 1_000L
                 } catch (e: Exception) {
                     if (running && !Thread.currentThread().isInterrupted) {
-                        BlinkLog.warn("Redis 订阅断开，将在 ${retryMillis}ms 后重连: ${e.message}")
+                        BlinkLog.warn(
+                            "[redis-subscriber-disconnected] retryMillis=$retryMillis; " +
+                                "Redis 订阅断开，将在 ${retryMillis}ms 后重连: ${e.message}"
+                        )
                     }
                 } finally {
                     if (pubSub === listener) pubSub = null

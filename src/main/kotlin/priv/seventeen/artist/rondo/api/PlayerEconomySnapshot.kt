@@ -35,7 +35,7 @@ data class CurrencyEconomySnapshot(
 /**
  * 玩家全部已注册货币的不可变只读快照。
  *
- * [revision] 仅在当前在线会话内递增，不能作为跨服数据库版本号。
+ * [revision] 仅用于当前 Rondo 进程内的快照发布顺序，不能作为跨服数据库版本号。
  */
 class PlayerEconomySnapshot internal constructor(
     val playerUuid: UUID,

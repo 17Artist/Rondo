@@ -151,69 +151,72 @@ object ExchangeManager {
             return ExchangeResult(false, "兑换金额超出有效范围")
         }
 
-        return AccountManager.withPlayerLock(player) {
-            val balance = AccountManager.getBalance(player, rule.fromCurrency)
-            if (balance < fromAmount) {
-                return@withPlayerLock ExchangeResult(
-                    false,
-                    "余额不足，需要 ${fromCurrency.format(fromAmount)}",
-                    fromAmount = fromAmount
-                )
-            }
-
-            val event = EconomyExchangeEvent(player, fromCurrency, toCurrency, fromAmount, target)
-            Bukkit.getPluginManager().callEvent(event)
-            if (event.isCancelled) {
-                return@withPlayerLock ExchangeResult(false, "兑换被取消")
-            }
-
-            val limited = rule.maxPerPeriod > 0 && rule.period != ExchangePeriod.NONE
-            val atomic = AccountManager.exchange(
-                ExchangeBalanceRequest(
-                    playerUuid = player,
-                    ruleId = rule.id,
-                    fromCurrencyId = fromCurrency.id,
-                    toCurrencyId = toCurrency.id,
-                    debitAmount = fromAmount,
-                    creditAmount = target,
-                    allowNegative = fromCurrency.negativeAllowed,
-                    fromInitialBalance = fromCurrency.defaultBalance,
-                    toInitialBalance = toCurrency.defaultBalance,
-                    toMaxBalance = toCurrency.maxBalance.takeIf { toCurrency.hasMaxBalance }
-                        ?: MoneyConstraints.MAX_ABSOLUTE_BALANCE,
-                    periodStart = ExchangePeriodWindow.startMillis(rule.period).takeIf { limited },
-                    periodLimit = BigDecimal.valueOf(rule.maxPerPeriod.toLong()).takeIf { limited }
-                )
+        val balance = AccountManager.getBalance(player, rule.fromCurrency)
+        if (!fromCurrency.negativeAllowed && balance < fromAmount) {
+            return ExchangeResult(
+                false,
+                "余额不足，需要 ${fromCurrency.format(fromAmount)}",
+                fromAmount = fromAmount
             )
-            if (!atomic.success) {
-                val message = when (atomic.failure) {
-                    AtomicBalanceFailure.INSUFFICIENT_FUNDS -> "余额不足"
-                    AtomicBalanceFailure.BALANCE_LIMIT -> "目标货币余额将超过上限"
-                    AtomicBalanceFailure.PERIOD_LIMIT -> "已达到本周期兑换上限"
-                    else -> "兑换失败"
-                }
-                return@withPlayerLock ExchangeResult(false, message, fromAmount = fromAmount)
-            }
+        }
+        val event = EconomyExchangeEvent(player, fromCurrency, toCurrency, fromAmount, target)
+        Bukkit.getPluginManager().callEvent(event)
+        if (event.isCancelled) {
+            return ExchangeResult(false, "兑换被取消")
+        }
 
+        val limited = rule.maxPerPeriod > 0 && rule.period != ExchangePeriod.NONE
+        val atomic = AccountManager.exchange(
+            ExchangeBalanceRequest(
+                playerUuid = player,
+                ruleId = rule.id,
+                fromCurrencyId = fromCurrency.id,
+                toCurrencyId = toCurrency.id,
+                debitAmount = fromAmount,
+                creditAmount = target,
+                allowNegative = fromCurrency.negativeAllowed,
+                fromInitialBalance = fromCurrency.defaultBalance,
+                toInitialBalance = toCurrency.defaultBalance,
+                toMaxBalance = toCurrency.maxBalance.takeIf { toCurrency.hasMaxBalance }
+                    ?: MoneyConstraints.MAX_ABSOLUTE_BALANCE,
+                periodStart = ExchangePeriodWindow.startMillis(rule.period).takeIf { limited },
+                periodLimit = BigDecimal.valueOf(rule.maxPerPeriod.toLong()).takeIf { limited }
+            )
+        )
+        if (!atomic.success) {
+            val message = when (atomic.failure) {
+                AtomicBalanceFailure.INSUFFICIENT_FUNDS -> "余额不足"
+                AtomicBalanceFailure.BALANCE_LIMIT -> "目标货币余额将超过上限"
+                AtomicBalanceFailure.PERIOD_LIMIT -> "已达到本周期兑换上限"
+                else -> "兑换失败"
+            }
+            return ExchangeResult(false, message, fromAmount = fromAmount)
+        }
+
+        val fromAfter = atomic.getCommittedBalance(player, fromCurrency.id)?.balance
+        val toAfter = atomic.getCommittedBalance(player, toCurrency.id)?.balance
+        if (fromAfter != null) {
             LogManager.submit(TransactionLog(
                 playerUuid = player,
                 currencyId = fromCurrency.id,
                 action = TransactionLog.Action.EXCHANGE_OUT,
                 amount = fromAmount,
-                balanceAfter = AccountManager.getBalance(player, fromCurrency.id),
+                balanceAfter = fromAfter,
                 source = "exchange:${rule.id}"
             ))
+        }
+        if (toAfter != null) {
             LogManager.submit(TransactionLog(
                 playerUuid = player,
                 currencyId = toCurrency.id,
                 action = TransactionLog.Action.EXCHANGE_IN,
                 amount = target,
-                balanceAfter = AccountManager.getBalance(player, toCurrency.id),
+                balanceAfter = toAfter,
                 source = "exchange:${rule.id}"
             ))
-
-            ExchangeResult(true, "兑换成功", fromAmount = fromAmount, toAmount = target)
         }
+
+        return ExchangeResult(true, "兑换成功", fromAmount = fromAmount, toAmount = target)
     }
 
     private fun loadRules() {

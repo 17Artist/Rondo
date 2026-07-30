@@ -36,36 +36,29 @@ interface StorageProvider {
     /** 加载玩家所有货币余额 */
     fun loadBalances(playerUuid: UUID): Map<String, BalanceData>
 
-    /** 保存玩家单个货币余额 */
-    fun saveBalance(playerUuid: UUID, currencyId: String, data: BalanceData)
-
-    /** 批量保存余额 */
-    fun saveBalancesBatch(entries: List<BalanceEntry>)
-
     /**
-     * 直接更新离线玩家余额（原子操作）
+     * 原子增减余额，并返回数据库实际提交后的余额数据。
      * @param maxBalance 余额上限，存入时若超过则拒绝；传 null 仅跳过业务上限，
      * 仍受存储绝对边界约束
      */
-    fun updateOfflineBalance(
+    fun updateBalance(
         playerUuid: UUID,
         currencyId: String,
         delta: BigDecimal,
-        source: String,
         allowNegative: Boolean = false,
         maxBalance: BigDecimal? = null,
         initialBalance: BigDecimal = BigDecimal.ZERO
-    ): Boolean
+    ): AtomicBalanceResult
 
-    /** 原子设置余额；保留累计获得/消耗统计。 */
-    fun setOfflineBalance(
+    /** 原子设置余额并返回提交后的余额；保留累计获得/消耗统计。 */
+    fun setBalance(
         playerUuid: UUID,
         currencyId: String,
         amount: BigDecimal
-    ): Boolean
+    ): AtomicBalanceResult
 
-    /** 获取离线玩家余额 */
-    fun getOfflineBalance(playerUuid: UUID, currencyId: String): BalanceData?
+    /** 获取权威余额 */
+    fun getBalance(playerUuid: UUID, currencyId: String): BalanceData?
 
     /**
      * 在一个存储事务中完成玩家间转账。
@@ -116,15 +109,6 @@ data class BalanceData(
 )
 
 /**
- * 批量保存条目
- */
-data class BalanceEntry(
-    val playerUuid: UUID,
-    val currencyId: String,
-    val data: BalanceData
-)
-
-/**
  * 排行榜数据
  */
 data class RankingData(
@@ -139,10 +123,23 @@ enum class AtomicBalanceFailure {
     PERIOD_LIMIT
 }
 
+data class CommittedBalance(
+    val playerUuid: UUID,
+    val currencyId: String,
+    val data: BalanceData
+)
+
 data class AtomicBalanceResult(
     val success: Boolean,
-    val failure: AtomicBalanceFailure? = null
-)
+    val failure: AtomicBalanceFailure? = null,
+    val committedBalances: List<CommittedBalance> = emptyList()
+) {
+    fun getCommittedBalance(playerUuid: UUID, currencyId: String): BalanceData? {
+        return committedBalances.firstOrNull {
+            it.playerUuid == playerUuid && it.currencyId.equals(currencyId, ignoreCase = true)
+        }?.data
+    }
+}
 
 data class TransferBalanceRequest(
     val from: UUID,

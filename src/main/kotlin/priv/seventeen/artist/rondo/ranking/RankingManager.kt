@@ -49,8 +49,9 @@ object RankingManager {
     fun getRanking(currencyId: String, page: Int, pageSize: Int): List<RankingEntry> {
         if (page < 1 || pageSize !in 1..100) return emptyList()
         val list = rankings[currencyId.lowercase()] ?: return emptyList()
-        val start = (page - 1) * pageSize
-        if (start >= list.size) return emptyList()
+        val startLong = (page.toLong() - 1L) * pageSize.toLong()
+        if (startLong >= list.size) return emptyList()
+        val start = startLong.toInt()
         val end = minOf(start + pageSize, list.size)
         return list.subList(start, end)
     }

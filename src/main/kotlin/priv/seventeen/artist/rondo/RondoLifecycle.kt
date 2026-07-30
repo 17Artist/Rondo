@@ -22,6 +22,7 @@ import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.permissions.Permission
 import org.bukkit.permissions.PermissionDefault
 import priv.seventeen.artist.blink.BlinkLog
+import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.blink.event.AutoListener
 import priv.seventeen.artist.blink.lifecycle.Awake
 import priv.seventeen.artist.blink.lifecycle.LifeCycle
@@ -103,10 +104,17 @@ object RondoLifecycle {
             } else {
                 "§7单服"
             }
-            BlinkLog.success("Rondo 已启用 §7(${CurrencyRegistry.getAll().size} 个货币, $mode§7)")
+            BlinkLog.success(
+                "[startup-complete] Rondo 已启用 §7(${CurrencyRegistry.getAll().size} 个货币, $mode§7)"
+            )
         } catch (failure: Throwable) {
-            BlinkLog.error("Rondo 初始化失败，正在关闭已创建的资源", failure)
+            BlinkLog.error("[startup-failed] Rondo 初始化失败，正在关闭已创建的资源", failure)
             cleanup()
+            try {
+                Bukkit.getPluginManager().disablePlugin(bukkitPlugin)
+            } catch (disableFailure: Throwable) {
+                failure.addSuppressed(disableFailure)
+            }
             throw failure
         }
     }

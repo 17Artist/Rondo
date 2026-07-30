@@ -51,6 +51,20 @@ object LogManager {
     fun initialize(config: MainConfig) {
         enabled = config.features.transactionLog
         maxQueueSize = config.performance.logQueueSize
+
+        val retentionDays = config.features.logRetentionDays
+        if (retentionDays > 0) {
+            object : BukkitRunnable() {
+                override fun run() {
+                    try {
+                        StorageManager.provider.cleanExpiredLogs(retentionDays)
+                    } catch (e: Exception) {
+                        BlinkLog.warn("清理过期经济审计记录失败: ${e.message}")
+                    }
+                }
+            }.runTaskTimerAsynchronously(bukkitPlugin, 72_000L, 72_000L)
+        }
+
         if (!enabled) {
             BlinkLog.info("Transaction log disabled.")
             return
@@ -61,19 +75,6 @@ object LogManager {
                 flush()
             }
         }.runTaskTimerAsynchronously(bukkitPlugin, 100L, 100L)
-
-        val retentionDays = config.features.logRetentionDays
-        if (retentionDays > 0) {
-            object : BukkitRunnable() {
-                override fun run() {
-                    try {
-                        StorageManager.provider.cleanExpiredLogs(retentionDays)
-                    } catch (e: Exception) {
-                        BlinkLog.warn("清理过期流水失败: ${e.message}")
-                    }
-                }
-            }.runTaskTimerAsynchronously(bukkitPlugin, 72_000L, 72_000L)
-        }
     }
 
     fun submit(log: TransactionLog) {
@@ -182,7 +183,7 @@ object LogManager {
                 .use { writer ->
                 if (isNew) {
                     writer.appendLine(
-                        "# timestamp\\tuuid\\tcurrency\\taction\\tamount\\tbalance_after\\tsource_base64\\tdetail_base64"
+                        "# timestamp\tuuid\tcurrency\taction\tamount\tbalance_after\tsource_base64\tdetail_base64"
                     )
                 }
                 for (log in logs) {

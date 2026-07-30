@@ -22,7 +22,7 @@ plugins {
 }
 
 group = "priv.seventeen.artist"
-version = providers.gradleProperty("version").getOrElse("1.0.0-SNAPSHOT")
+version = providers.gradleProperty("version").getOrElse("1.1.0-SNAPSHOT")
 
 blink {
     name.set("Rondo")
@@ -37,7 +37,8 @@ blink {
         "com.zaxxer:HikariCP:5.1.0",
         "com.mysql:mysql-connector-j:8.4.0",
         "org.xerial:sqlite-jdbc:3.44.1.0",
-        "redis.clients:jedis:5.1.0"
+        "redis.clients:jedis:5.1.0",
+        "org.apache.commons:commons-pool2:2.12.0"
     ))
 }
 
@@ -79,6 +80,7 @@ dependencies {
     compileOnly("com.mysql:mysql-connector-j:8.4.0")
     compileOnly("org.xerial:sqlite-jdbc:3.44.1.0")
     compileOnly("redis.clients:jedis:5.1.0")
+    compileOnly("org.apache.commons:commons-pool2:2.12.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")

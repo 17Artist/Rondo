@@ -167,73 +167,14 @@ class SQLiteProvider(
         return result
     }
 
-    override fun saveBalance(playerUuid: UUID, currencyId: String, data: BalanceData) {
-        requireValidBalanceData(data)
-        synchronized(lock) {
-            getConnection().prepareStatement("""
-                INSERT INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
-                ON CONFLICT(player_uuid, currency_id) DO UPDATE SET
-                    balance = excluded.balance,
-                    total_earned = excluded.total_earned,
-                    total_spent = excluded.total_spent,
-                    updated_at = datetime('now')
-            """.trimIndent()).use { ps ->
-                ps.setString(1, playerUuid.toString())
-                ps.setString(2, currencyId)
-                ps.setString(3, data.balance.toPlainString())
-                ps.setString(4, data.totalEarned.toPlainString())
-                ps.setString(5, data.totalSpent.toPlainString())
-                ps.executeUpdate()
-            }
-        }
-    }
-
-    override fun saveBalancesBatch(entries: List<BalanceEntry>) {
-        if (entries.isEmpty()) return
-        entries.forEach { requireValidBalanceData(it.data) }
-        synchronized(lock) {
-            val conn = getConnection()
-            conn.autoCommit = false
-            try {
-                conn.prepareStatement("""
-                    INSERT INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'))
-                    ON CONFLICT(player_uuid, currency_id) DO UPDATE SET
-                        balance = excluded.balance,
-                        total_earned = excluded.total_earned,
-                        total_spent = excluded.total_spent,
-                        updated_at = datetime('now')
-                """.trimIndent()).use { ps ->
-                    for (entry in entries) {
-                        ps.setString(1, entry.playerUuid.toString())
-                        ps.setString(2, entry.currencyId)
-                        ps.setString(3, entry.data.balance.toPlainString())
-                        ps.setString(4, entry.data.totalEarned.toPlainString())
-                        ps.setString(5, entry.data.totalSpent.toPlainString())
-                        ps.addBatch()
-                    }
-                    ps.executeBatch()
-                }
-                conn.commit()
-            } catch (e: Exception) {
-                conn.rollback()
-                throw e
-            } finally {
-                conn.autoCommit = true
-            }
-        }
-    }
-
-    override fun updateOfflineBalance(
+    override fun updateBalance(
         playerUuid: UUID,
         currencyId: String,
         delta: BigDecimal,
-        source: String,
         allowNegative: Boolean,
         maxBalance: BigDecimal?,
         initialBalance: BigDecimal
-    ): Boolean {
+    ): AtomicBalanceResult {
         synchronized(lock) {
             val conn = getConnection()
             conn.autoCommit = false
@@ -271,12 +212,15 @@ class SQLiteProvider(
                     (delta < BigDecimal.ZERO && newBalance < BigDecimal.ZERO && !allowNegative)
                 ) {
                     conn.rollback()
-                    return false
+                    return AtomicBalanceResult(
+                        false,
+                        AtomicBalanceFailure.INSUFFICIENT_FUNDS
+                    )
                 }
-                // 检查余额上限（存入时），与在线 Account.deposit 保持一致
+                // 检查余额上限（存入时）
                 if (delta > BigDecimal.ZERO && maxBalance != null && newBalance > maxBalance) {
                     conn.rollback()
-                    return false
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
                 }
 
                 // 更新余额
@@ -286,7 +230,7 @@ class SQLiteProvider(
                     !MoneyConstraints.isCumulativeStorable(newSpent)
                 ) {
                     conn.rollback()
-                    return false
+                    return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
                 }
 
                 conn.prepareStatement("""
@@ -300,8 +244,14 @@ class SQLiteProvider(
                     ps.setString(5, currencyId)
                     ps.executeUpdate()
                 }
+                val committed = BalanceData(newBalance, newEarned, newSpent)
                 conn.commit()
-                return true
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(playerUuid, currencyId, committed)
+                    )
+                )
             } catch (e: Exception) {
                 conn.rollback()
                 throw e
@@ -311,23 +261,40 @@ class SQLiteProvider(
         }
     }
 
-    override fun setOfflineBalance(
+    override fun setBalance(
         playerUuid: UUID,
         currencyId: String,
         amount: BigDecimal
-    ): Boolean {
+    ): AtomicBalanceResult {
         synchronized(lock) {
-            getConnection().prepareStatement("""
-                INSERT INTO rondo_balance
-                    (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
-                VALUES (?, ?, ?, '0', '0', datetime('now'))
-                ON CONFLICT(player_uuid, currency_id) DO UPDATE
-                SET balance = excluded.balance, updated_at = datetime('now')
-            """.trimIndent()).use { ps ->
-                ps.setString(1, playerUuid.toString())
-                ps.setString(2, currencyId)
-                ps.setString(3, amount.toPlainString())
-                return ps.executeUpdate() == 1
+            val conn = getConnection()
+            conn.autoCommit = false
+            try {
+                conn.prepareStatement("""
+                    INSERT INTO rondo_balance
+                        (player_uuid, currency_id, balance, total_earned, total_spent, updated_at)
+                    VALUES (?, ?, ?, '0', '0', datetime('now'))
+                    ON CONFLICT(player_uuid, currency_id) DO UPDATE
+                    SET balance = excluded.balance, updated_at = datetime('now')
+                """.trimIndent()).use { ps ->
+                    ps.setString(1, playerUuid.toString())
+                    ps.setString(2, currencyId)
+                    ps.setString(3, amount.toPlainString())
+                    ps.executeUpdate()
+                }
+                val committed = readBalance(conn, playerUuid, currencyId)
+                conn.commit()
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(playerUuid, currencyId, committed)
+                    )
+                )
+            } catch (e: Exception) {
+                conn.rollback()
+                throw e
+            } finally {
+                conn.autoCommit = true
             }
         }
     }
@@ -369,26 +336,24 @@ class SQLiteProvider(
                     return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
                 }
 
-                writeBalance(
-                    conn,
-                    request.from,
-                    request.currencyId,
-                    fromData.copy(
-                        balance = fromAfter,
-                        totalSpent = fromData.totalSpent.add(request.debitAmount)
-                    )
+                val committedFrom = fromData.copy(
+                    balance = fromAfter,
+                    totalSpent = fromData.totalSpent.add(request.debitAmount)
                 )
-                writeBalance(
-                    conn,
-                    request.to,
-                    request.currencyId,
-                    toData.copy(
-                        balance = toAfter,
-                        totalEarned = toData.totalEarned.add(request.creditAmount)
-                    )
+                val committedTo = toData.copy(
+                    balance = toAfter,
+                    totalEarned = toData.totalEarned.add(request.creditAmount)
                 )
+                writeBalance(conn, request.from, request.currencyId, committedFrom)
+                writeBalance(conn, request.to, request.currencyId, committedTo)
                 conn.commit()
-                return AtomicBalanceResult(true)
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(request.from, request.currencyId, committedFrom),
+                        CommittedBalance(request.to, request.currencyId, committedTo)
+                    )
+                )
             } catch (e: Exception) {
                 conn.rollback()
                 throw e
@@ -453,24 +418,16 @@ class SQLiteProvider(
                     }
                 }
 
-                writeBalance(
-                    conn,
-                    request.playerUuid,
-                    request.fromCurrencyId,
-                    fromData.copy(
-                        balance = fromAfter,
-                        totalSpent = fromData.totalSpent.add(request.debitAmount)
-                    )
+                val committedFrom = fromData.copy(
+                    balance = fromAfter,
+                    totalSpent = fromData.totalSpent.add(request.debitAmount)
                 )
-                writeBalance(
-                    conn,
-                    request.playerUuid,
-                    request.toCurrencyId,
-                    toData.copy(
-                        balance = toAfter,
-                        totalEarned = toData.totalEarned.add(request.creditAmount)
-                    )
+                val committedTo = toData.copy(
+                    balance = toAfter,
+                    totalEarned = toData.totalEarned.add(request.creditAmount)
                 )
+                writeBalance(conn, request.playerUuid, request.fromCurrencyId, committedFrom)
+                writeBalance(conn, request.playerUuid, request.toCurrencyId, committedTo)
                 conn.prepareStatement("""
                     INSERT INTO rondo_exchange_record (player_uuid, rule_id, amount, created_at)
                     VALUES (?, ?, ?, datetime('now'))
@@ -481,7 +438,21 @@ class SQLiteProvider(
                     ps.executeUpdate()
                 }
                 conn.commit()
-                return AtomicBalanceResult(true)
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(
+                            request.playerUuid,
+                            request.fromCurrencyId,
+                            committedFrom
+                        ),
+                        CommittedBalance(
+                            request.playerUuid,
+                            request.toCurrencyId,
+                            committedTo
+                        )
+                    )
+                )
             } catch (e: Exception) {
                 conn.rollback()
                 throw e
@@ -564,7 +535,7 @@ class SQLiteProvider(
         conn: Connection,
         request: ExchangeBalanceRequest
     ): BigDecimal {
-        val inserted = conn.prepareStatement("""
+        conn.prepareStatement("""
             INSERT OR IGNORE INTO rondo_exchange_quota
                 (player_uuid, rule_id, period_start, amount)
             VALUES (?, ?, ?, '0')
@@ -572,34 +543,17 @@ class SQLiteProvider(
             ps.setString(1, request.playerUuid.toString())
             ps.setString(2, request.ruleId)
             ps.setLong(3, request.periodStart!!)
-            ps.executeUpdate() == 1
+            ps.executeUpdate()
         }
 
-        if (inserted) {
-            var historical = BigDecimal.ZERO
-            conn.prepareStatement("""
-                SELECT amount FROM rondo_exchange_record
-                WHERE player_uuid = ? AND rule_id = ? AND created_at >= datetime(? / 1000, 'unixepoch')
-            """.trimIndent()).use { ps ->
-                ps.setString(1, request.playerUuid.toString())
-                ps.setString(2, request.ruleId)
-                ps.setLong(3, request.periodStart!!)
-                ps.executeQuery().use { rs ->
-                    while (rs.next()) {
-                        historical = historical.add(BigDecimal(rs.getString("amount")))
-                    }
-                }
-            }
-            conn.prepareStatement("""
-                UPDATE rondo_exchange_quota SET amount = ?
-                WHERE player_uuid = ? AND rule_id = ? AND period_start = ?
-            """.trimIndent()).use { ps ->
-                ps.setString(1, historical.toPlainString())
-                ps.setString(2, request.playerUuid.toString())
-                ps.setString(3, request.ruleId)
-                ps.setLong(4, request.periodStart!!)
-                ps.executeUpdate()
-            }
+        conn.prepareStatement("""
+            DELETE FROM rondo_exchange_quota
+            WHERE player_uuid = ? AND rule_id = ? AND period_start < ?
+        """.trimIndent()).use { ps ->
+            ps.setString(1, request.playerUuid.toString())
+            ps.setString(2, request.ruleId)
+            ps.setLong(3, request.periodStart!!)
+            ps.executeUpdate()
         }
 
         conn.prepareStatement("""
@@ -631,7 +585,7 @@ class SQLiteProvider(
         }
     }
 
-    override fun getOfflineBalance(playerUuid: UUID, currencyId: String): BalanceData? {
+    override fun getBalance(playerUuid: UUID, currencyId: String): BalanceData? {
         synchronized(lock) {
             getConnection().prepareStatement("SELECT balance, total_earned, total_spent FROM rondo_balance WHERE player_uuid = ? AND currency_id = ?").use { ps ->
                 ps.setString(1, playerUuid.toString())
@@ -704,6 +658,7 @@ class SQLiteProvider(
 
     override fun queryLogs(playerUuid: UUID, currencyId: String?, page: Int, pageSize: Int): List<TransactionLog> {
         val result = mutableListOf<TransactionLog>()
+        val offset = (page.toLong() - 1L) * pageSize.toLong()
         val sql = if (currencyId != null) {
             "SELECT * FROM rondo_log WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
         } else {
@@ -715,7 +670,7 @@ class SQLiteProvider(
                 ps.setString(idx++, playerUuid.toString())
                 if (currencyId != null) ps.setString(idx++, currencyId)
                 ps.setInt(idx++, pageSize)
-                ps.setInt(idx, (page - 1) * pageSize)
+                ps.setLong(idx, offset)
                 ps.executeQuery().use { rs ->
                     while (rs.next()) {
                         val timeStr = rs.getString("created_at")
@@ -740,12 +695,25 @@ class SQLiteProvider(
     override fun cleanExpiredLogs(retentionDays: Int) {
         if (retentionDays <= 0) return
         synchronized(lock) {
-            getConnection().prepareStatement("DELETE FROM rondo_log WHERE created_at < datetime('now', ?)").use { ps ->
-                ps.setString(1, "-$retentionDays days")
-                val deleted = ps.executeUpdate()
-                if (deleted > 0) {
-                    BlinkLog.info("Cleaned $deleted expired log entries.")
-                }
+            val conn = getConnection()
+            val modifier = "-$retentionDays days"
+            val deletedLogs = conn.prepareStatement(
+                "DELETE FROM rondo_log WHERE created_at < datetime('now', ?)"
+            ).use { ps ->
+                ps.setString(1, modifier)
+                ps.executeUpdate()
+            }
+            val deletedExchanges = conn.prepareStatement(
+                "DELETE FROM rondo_exchange_record WHERE created_at < datetime('now', ?)"
+            ).use { ps ->
+                ps.setString(1, modifier)
+                ps.executeUpdate()
+            }
+            if (logInitialization && (deletedLogs > 0 || deletedExchanges > 0)) {
+                BlinkLog.info(
+                    "Cleaned $deletedLogs expired transaction logs and " +
+                        "$deletedExchanges exchange audit records."
+                )
             }
         }
     }

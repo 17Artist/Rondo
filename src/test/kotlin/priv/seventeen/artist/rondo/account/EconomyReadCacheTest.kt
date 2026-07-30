@@ -84,6 +84,25 @@ class EconomyReadCacheTest {
         assertEquals(2, cache.size())
     }
 
+    @Test
+    fun `invalidate removes online and offline snapshots without corrupting capacity accounting`() {
+        val cache = EconomyReadCache(maxOfflineEntries = 1)
+        val online = snapshot()
+        val firstOffline = snapshot()
+        val secondOffline = snapshot()
+
+        cache.publishOnline(online)
+        cache.publishOffline(firstOffline, 1_000L)
+        cache.invalidate(online.playerUuid)
+        cache.invalidate(firstOffline.playerUuid)
+        cache.publishOffline(secondOffline, 1_000L)
+
+        assertNull(cache.get(online.playerUuid))
+        assertNull(cache.get(firstOffline.playerUuid))
+        assertSame(secondOffline, cache.get(secondOffline.playerUuid))
+        assertEquals(1, cache.size())
+    }
+
     private fun snapshot() = PlayerEconomySnapshot(
         playerUuid = UUID.randomUUID(),
         currencies = emptyMap(),

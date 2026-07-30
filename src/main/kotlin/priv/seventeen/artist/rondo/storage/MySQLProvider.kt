@@ -151,71 +151,23 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         return result
     }
 
-    override fun saveBalance(playerUuid: UUID, currencyId: String, data: BalanceData) {
-        requireValidBalanceData(data)
-        getConnection().use { conn ->
-            conn.prepareStatement("""
-                INSERT INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent)
-                VALUES (?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE balance = VALUES(balance), total_earned = VALUES(total_earned), total_spent = VALUES(total_spent)
-            """.trimIndent()).use { ps ->
-                ps.setString(1, playerUuid.toString())
-                ps.setString(2, currencyId)
-                ps.setBigDecimal(3, data.balance)
-                ps.setBigDecimal(4, data.totalEarned)
-                ps.setBigDecimal(5, data.totalSpent)
-                ps.executeUpdate()
-            }
-        }
-    }
-
-    override fun saveBalancesBatch(entries: List<BalanceEntry>) {
-        if (entries.isEmpty()) return
-        entries.forEach { requireValidBalanceData(it.data) }
-        getConnection().use { conn ->
-            conn.autoCommit = false
-            try {
-                conn.prepareStatement("""
-                    INSERT INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE balance = VALUES(balance), total_earned = VALUES(total_earned), total_spent = VALUES(total_spent)
-                """.trimIndent()).use { ps ->
-                    for (entry in entries) {
-                        ps.setString(1, entry.playerUuid.toString())
-                        ps.setString(2, entry.currencyId)
-                        ps.setBigDecimal(3, entry.data.balance)
-                        ps.setBigDecimal(4, entry.data.totalEarned)
-                        ps.setBigDecimal(5, entry.data.totalSpent)
-                        ps.addBatch()
-                    }
-                    ps.executeBatch()
-                }
-                conn.commit()
-            } catch (e: Exception) {
-                conn.rollback()
-                throw e
-            } finally {
-                conn.autoCommit = true
-            }
-        }
-    }
-
-    override fun updateOfflineBalance(
+    override fun updateBalance(
         playerUuid: UUID,
         currencyId: String,
         delta: BigDecimal,
-        source: String,
         allowNegative: Boolean,
         maxBalance: BigDecimal?,
         initialBalance: BigDecimal
-    ): Boolean {
+    ): AtomicBalanceResult {
         getConnection().use { conn ->
             conn.autoCommit = false
             try {
                 // 先确保记录存在
                 conn.prepareStatement("""
-                    INSERT IGNORE INTO rondo_balance (player_uuid, currency_id, balance, total_earned, total_spent)
+                    INSERT INTO rondo_balance
+                        (player_uuid, currency_id, balance, total_earned, total_spent)
                     VALUES (?, ?, ?, 0, 0)
+                    ON DUPLICATE KEY UPDATE player_uuid = VALUES(player_uuid)
                 """.trimIndent()).use { ps ->
                     ps.setString(1, playerUuid.toString())
                     ps.setString(2, currencyId)
@@ -261,12 +213,34 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                     }
                     val rows = ps.executeUpdate()
                     if (rows == 0) {
+                        val failure = if (delta < BigDecimal.ZERO) {
+                            val current = readBalanceForUpdate(conn, playerUuid, currencyId)
+                            if (!MoneyConstraints.isCumulativeStorable(
+                                    current.totalSpent.add(delta.abs())
+                                )
+                            ) {
+                                AtomicBalanceFailure.BALANCE_LIMIT
+                            } else {
+                                AtomicBalanceFailure.INSUFFICIENT_FUNDS
+                            }
+                        } else {
+                            AtomicBalanceFailure.BALANCE_LIMIT
+                        }
                         conn.rollback()
-                        return false
+                        return AtomicBalanceResult(
+                            success = false,
+                            failure = failure
+                        )
                     }
                 }
+                val committed = readBalanceForUpdate(conn, playerUuid, currencyId)
                 conn.commit()
-                return true
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(playerUuid, currencyId, committed)
+                    )
+                )
             } catch (e: Exception) {
                 conn.rollback()
                 throw e
@@ -276,23 +250,38 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         }
     }
 
-    override fun setOfflineBalance(
+    override fun setBalance(
         playerUuid: UUID,
         currencyId: String,
         amount: BigDecimal
-    ): Boolean {
+    ): AtomicBalanceResult {
         getConnection().use { conn ->
-            conn.prepareStatement("""
-                INSERT INTO rondo_balance
-                    (player_uuid, currency_id, balance, total_earned, total_spent)
-                VALUES (?, ?, ?, 0, 0)
-                ON DUPLICATE KEY UPDATE balance = VALUES(balance)
-            """.trimIndent()).use { ps ->
-                ps.setString(1, playerUuid.toString())
-                ps.setString(2, currencyId)
-                ps.setBigDecimal(3, amount)
-                ps.executeUpdate()
-                return true
+            conn.autoCommit = false
+            try {
+                conn.prepareStatement("""
+                    INSERT INTO rondo_balance
+                        (player_uuid, currency_id, balance, total_earned, total_spent)
+                    VALUES (?, ?, ?, 0, 0)
+                    ON DUPLICATE KEY UPDATE balance = VALUES(balance)
+                """.trimIndent()).use { ps ->
+                    ps.setString(1, playerUuid.toString())
+                    ps.setString(2, currencyId)
+                    ps.setBigDecimal(3, amount)
+                    ps.executeUpdate()
+                }
+                val committed = readBalanceForUpdate(conn, playerUuid, currencyId)
+                conn.commit()
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(playerUuid, currencyId, committed)
+                    )
+                )
+            } catch (e: Exception) {
+                conn.rollback()
+                throw e
+            } finally {
+                conn.autoCommit = true
             }
         }
     }
@@ -340,26 +329,24 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                     return AtomicBalanceResult(false, AtomicBalanceFailure.BALANCE_LIMIT)
                 }
 
-                writeBalance(
-                    conn,
-                    request.from,
-                    request.currencyId,
-                    fromData.copy(
-                        balance = fromAfter,
-                        totalSpent = fromData.totalSpent.add(request.debitAmount)
-                    )
+                val committedFrom = fromData.copy(
+                    balance = fromAfter,
+                    totalSpent = fromData.totalSpent.add(request.debitAmount)
                 )
-                writeBalance(
-                    conn,
-                    request.to,
-                    request.currencyId,
-                    toData.copy(
-                        balance = toAfter,
-                        totalEarned = toData.totalEarned.add(request.creditAmount)
-                    )
+                val committedTo = toData.copy(
+                    balance = toAfter,
+                    totalEarned = toData.totalEarned.add(request.creditAmount)
                 )
+                writeBalance(conn, request.from, request.currencyId, committedFrom)
+                writeBalance(conn, request.to, request.currencyId, committedTo)
                 conn.commit()
-                return AtomicBalanceResult(true)
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(request.from, request.currencyId, committedFrom),
+                        CommittedBalance(request.to, request.currencyId, committedTo)
+                    )
+                )
             } catch (e: Exception) {
                 conn.rollback()
                 throw e
@@ -430,24 +417,16 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                     }
                 }
 
-                writeBalance(
-                    conn,
-                    request.playerUuid,
-                    request.fromCurrencyId,
-                    fromData.copy(
-                        balance = fromAfter,
-                        totalSpent = fromData.totalSpent.add(request.debitAmount)
-                    )
+                val committedFrom = fromData.copy(
+                    balance = fromAfter,
+                    totalSpent = fromData.totalSpent.add(request.debitAmount)
                 )
-                writeBalance(
-                    conn,
-                    request.playerUuid,
-                    request.toCurrencyId,
-                    toData.copy(
-                        balance = toAfter,
-                        totalEarned = toData.totalEarned.add(request.creditAmount)
-                    )
+                val committedTo = toData.copy(
+                    balance = toAfter,
+                    totalEarned = toData.totalEarned.add(request.creditAmount)
                 )
+                writeBalance(conn, request.playerUuid, request.fromCurrencyId, committedFrom)
+                writeBalance(conn, request.playerUuid, request.toCurrencyId, committedTo)
                 conn.prepareStatement("""
                     INSERT INTO rondo_exchange_record
                         (player_uuid, rule_id, amount, created_at)
@@ -459,7 +438,21 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                     ps.executeUpdate()
                 }
                 conn.commit()
-                return AtomicBalanceResult(true)
+                return AtomicBalanceResult(
+                    success = true,
+                    committedBalances = listOf(
+                        CommittedBalance(
+                            request.playerUuid,
+                            request.fromCurrencyId,
+                            committedFrom
+                        ),
+                        CommittedBalance(
+                            request.playerUuid,
+                            request.toCurrencyId,
+                            committedTo
+                        )
+                    )
+                )
             } catch (e: Exception) {
                 conn.rollback()
                 throw e
@@ -476,9 +469,10 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         initialBalance: BigDecimal
     ) {
         conn.prepareStatement("""
-            INSERT IGNORE INTO rondo_balance
+            INSERT INTO rondo_balance
                 (player_uuid, currency_id, balance, total_earned, total_spent)
             VALUES (?, ?, ?, 0, 0)
+            ON DUPLICATE KEY UPDATE player_uuid = VALUES(player_uuid)
         """.trimIndent()).use { ps ->
             ps.setString(1, playerUuid.toString())
             ps.setString(2, currencyId)
@@ -548,18 +542,29 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         conn: Connection,
         request: ExchangeBalanceRequest
     ): BigDecimal {
-        val inserted = conn.prepareStatement("""
-            INSERT IGNORE INTO rondo_exchange_quota
+        conn.prepareStatement("""
+            INSERT INTO rondo_exchange_quota
                 (player_uuid, rule_id, period_start, amount)
             VALUES (?, ?, ?, 0)
+            ON DUPLICATE KEY UPDATE player_uuid = VALUES(player_uuid)
         """.trimIndent()).use { ps ->
             ps.setString(1, request.playerUuid.toString())
             ps.setString(2, request.ruleId)
             ps.setLong(3, request.periodStart!!)
-            ps.executeUpdate() == 1
+            ps.executeUpdate()
         }
 
-        var used = conn.prepareStatement("""
+        conn.prepareStatement("""
+            DELETE FROM rondo_exchange_quota
+            WHERE player_uuid = ? AND rule_id = ? AND period_start < ?
+        """.trimIndent()).use { ps ->
+            ps.setString(1, request.playerUuid.toString())
+            ps.setString(2, request.ruleId)
+            ps.setLong(3, request.periodStart!!)
+            ps.executeUpdate()
+        }
+
+        return conn.prepareStatement("""
             SELECT amount FROM rondo_exchange_quota
             WHERE player_uuid = ? AND rule_id = ? AND period_start = ?
             FOR UPDATE
@@ -572,33 +577,6 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                 rs.getBigDecimal("amount")
             }
         }
-
-        if (inserted) {
-            used = conn.prepareStatement("""
-                SELECT COALESCE(SUM(amount), 0) AS total
-                FROM rondo_exchange_record
-                WHERE player_uuid = ? AND rule_id = ? AND created_at >= ?
-            """.trimIndent()).use { ps ->
-                ps.setString(1, request.playerUuid.toString())
-                ps.setString(2, request.ruleId)
-                ps.setTimestamp(3, Timestamp(request.periodStart!!))
-                ps.executeQuery().use { rs ->
-                    check(rs.next())
-                    rs.getBigDecimal("total")
-                }
-            }
-            conn.prepareStatement("""
-                UPDATE rondo_exchange_quota SET amount = ?
-                WHERE player_uuid = ? AND rule_id = ? AND period_start = ?
-            """.trimIndent()).use { ps ->
-                ps.setBigDecimal(1, used)
-                ps.setString(2, request.playerUuid.toString())
-                ps.setString(3, request.ruleId)
-                ps.setLong(4, request.periodStart!!)
-                ps.executeUpdate()
-            }
-        }
-        return used
     }
 
     override fun savePlayerName(playerUuid: UUID, playerName: String) {
@@ -615,7 +593,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         }
     }
 
-    override fun getOfflineBalance(playerUuid: UUID, currencyId: String): BalanceData? {
+    override fun getBalance(playerUuid: UUID, currencyId: String): BalanceData? {
         getConnection().use { conn ->
             conn.prepareStatement("SELECT balance, total_earned, total_spent FROM rondo_balance WHERE player_uuid = ? AND currency_id = ?").use { ps ->
                 ps.setString(1, playerUuid.toString())
@@ -687,6 +665,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
 
     override fun queryLogs(playerUuid: UUID, currencyId: String?, page: Int, pageSize: Int): List<TransactionLog> {
         val result = mutableListOf<TransactionLog>()
+        val offset = (page.toLong() - 1L) * pageSize.toLong()
         val sql = if (currencyId != null) {
             "SELECT * FROM rondo_log WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
         } else {
@@ -698,7 +677,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                 ps.setString(idx++, playerUuid.toString())
                 if (currencyId != null) ps.setString(idx++, currencyId)
                 ps.setInt(idx++, pageSize)
-                ps.setInt(idx, (page - 1) * pageSize)
+                ps.setLong(idx, offset)
                 ps.executeQuery().use { rs ->
                     while (rs.next()) {
                         result.add(TransactionLog(
@@ -721,12 +700,23 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
     override fun cleanExpiredLogs(retentionDays: Int) {
         if (retentionDays <= 0) return
         getConnection().use { conn ->
-            conn.prepareStatement("DELETE FROM rondo_log WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)").use { ps ->
+            val deletedLogs = conn.prepareStatement(
+                "DELETE FROM rondo_log WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)"
+            ).use { ps ->
                 ps.setInt(1, retentionDays)
-                val deleted = ps.executeUpdate()
-                if (deleted > 0) {
-                    BlinkLog.info("Cleaned $deleted expired log entries.")
-                }
+                ps.executeUpdate()
+            }
+            val deletedExchanges = conn.prepareStatement(
+                "DELETE FROM rondo_exchange_record WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)"
+            ).use { ps ->
+                ps.setInt(1, retentionDays)
+                ps.executeUpdate()
+            }
+            if (deletedLogs > 0 || deletedExchanges > 0) {
+                BlinkLog.info(
+                    "Cleaned $deletedLogs expired transaction logs and " +
+                        "$deletedExchanges exchange audit records."
+                )
             }
         }
     }
@@ -761,14 +751,20 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
     override fun queryPlayerRank(playerUuid: UUID, currencyId: String): Int? {
         getConnection().use { conn ->
             conn.prepareStatement("""
-                SELECT COUNT(*) + 1 AS rank FROM rondo_balance 
-                WHERE currency_id = ? AND balance > (
-                    SELECT COALESCE(balance, 0) FROM rondo_balance WHERE player_uuid = ? AND currency_id = ?
-                )
+                SELECT (
+                    SELECT COUNT(*) + 1
+                    FROM rondo_balance b
+                    WHERE b.currency_id = target.currency_id
+                      AND (
+                          b.balance > target.balance
+                          OR (b.balance = target.balance AND b.player_uuid < target.player_uuid)
+                      )
+                ) AS rank
+                FROM rondo_balance target
+                WHERE target.player_uuid = ? AND target.currency_id = ?
             """.trimIndent()).use { ps ->
-                ps.setString(1, currencyId)
-                ps.setString(2, playerUuid.toString())
-                ps.setString(3, currencyId)
+                ps.setString(1, playerUuid.toString())
+                ps.setString(2, currencyId)
                 ps.executeQuery().use { rs ->
                     if (rs.next()) return rs.getInt("rank")
                 }

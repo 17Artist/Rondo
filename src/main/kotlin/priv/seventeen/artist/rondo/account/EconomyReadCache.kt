@@ -106,6 +106,13 @@ internal class EconomyReadCache(
         }
     }
 
+    fun invalidate(playerUuid: UUID) {
+        synchronized(maintenanceLock) {
+            val previous = entries.remove(playerUuid)
+            if (previous != null && !previous.online) offlineEntryCount--
+        }
+    }
+
     fun removeExpired(): Int {
         synchronized(maintenanceLock) {
             val now = clockMillis()
