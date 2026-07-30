@@ -39,7 +39,7 @@ jobs:
       - name: Publish to Maven repository
         env:
           repo: ${{ secrets.MAVEN_REPO_PASSWORD }}
-          ORG_GRADLE_PROJECT_mavenRepoUser: ${{ secrets.MAVEN_REPO_USER }}
+          ORG_GRADLE_PROJECT_mavenRepoUser: admin
         run: ./gradlew deploy -Pversion=${{ steps.version.outputs.version }}
 
       - name: Upload release artifact
