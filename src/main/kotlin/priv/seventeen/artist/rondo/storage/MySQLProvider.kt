@@ -32,6 +32,10 @@ import java.util.UUID
  */
 class MySQLProvider(private val config: MainConfig) : StorageProvider {
 
+    private companion object {
+        const val CLEANUP_BATCH_SIZE = 5_000
+    }
+
     private lateinit var dataSource: HikariDataSource
 
     override fun initialize() {
@@ -81,7 +85,8 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                         total_earned DECIMAL(38,4)  NOT NULL DEFAULT 0,
                         total_spent  DECIMAL(38,4)  NOT NULL DEFAULT 0,
                         updated_at   TIMESTAMP      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        PRIMARY KEY (player_uuid, currency_id)
+                        PRIMARY KEY (player_uuid, currency_id),
+                        INDEX idx_currency_balance (currency_id, balance DESC, player_uuid)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.trimIndent())
 
@@ -96,7 +101,8 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                         source      VARCHAR(128)   NOT NULL,
                         detail      VARCHAR(255),
                         created_at  TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_player_time (player_uuid, created_at)
+                        INDEX idx_player_time (player_uuid, created_at),
+                        INDEX idx_log_cleanup (created_at, id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.trimIndent())
 
@@ -107,7 +113,8 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                         rule_id     VARCHAR(64)    NOT NULL,
                         amount      DECIMAL(20,4)  NOT NULL,
                         created_at  TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_player_rule (player_uuid, rule_id, created_at)
+                        INDEX idx_player_rule (player_uuid, rule_id, created_at),
+                        INDEX idx_exchange_cleanup (created_at, id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.trimIndent())
 
@@ -117,7 +124,8 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                         rule_id     VARCHAR(64)   NOT NULL,
                         period_start BIGINT       NOT NULL,
                         amount      DECIMAL(20,4) NOT NULL DEFAULT 0,
-                        PRIMARY KEY (player_uuid, rule_id, period_start)
+                        PRIMARY KEY (player_uuid, rule_id, period_start),
+                        INDEX idx_quota_period (period_start)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.trimIndent())
 
@@ -128,6 +136,51 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                         updated_at  TIMESTAMP   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.trimIndent())
+
+                ensureIndex(
+                    conn,
+                    "rondo_balance",
+                    "idx_currency_balance",
+                    "currency_id, balance DESC, player_uuid"
+                )
+                ensureIndex(conn, "rondo_log", "idx_log_cleanup", "created_at, id")
+                ensureIndex(
+                    conn,
+                    "rondo_exchange_record",
+                    "idx_exchange_cleanup",
+                    "created_at, id"
+                )
+                ensureIndex(
+                    conn,
+                    "rondo_exchange_quota",
+                    "idx_quota_period",
+                    "period_start"
+                )
+            }
+        }
+    }
+
+    private fun ensureIndex(
+        conn: Connection,
+        table: String,
+        index: String,
+        columns: String
+    ) {
+        val exists = conn.prepareStatement("""
+            SELECT 1
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = ?
+              AND index_name = ?
+            LIMIT 1
+        """.trimIndent()).use { ps ->
+            ps.setString(1, table)
+            ps.setString(2, index)
+            ps.executeQuery().use { it.next() }
+        }
+        if (!exists) {
+            conn.createStatement().use { statement ->
+                statement.executeUpdate("ALTER TABLE $table ADD INDEX $index ($columns)")
             }
         }
     }
@@ -667,9 +720,9 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         val result = mutableListOf<TransactionLog>()
         val offset = (page.toLong() - 1L) * pageSize.toLong()
         val sql = if (currencyId != null) {
-            "SELECT * FROM rondo_log WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT * FROM rondo_log WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         } else {
-            "SELECT * FROM rondo_log WHERE player_uuid = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT * FROM rondo_log WHERE player_uuid = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         }
         getConnection().use { conn ->
             conn.prepareStatement(sql).use { ps ->
@@ -697,28 +750,71 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         return result
     }
 
-    override fun cleanExpiredLogs(retentionDays: Int) {
-        if (retentionDays <= 0) return
+    override fun cleanExpiredData(retentionDays: Int, exchangeQuotaCutoffMillis: Long) {
         getConnection().use { conn ->
-            val deletedLogs = conn.prepareStatement(
-                "DELETE FROM rondo_log WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)"
-            ).use { ps ->
-                ps.setInt(1, retentionDays)
-                ps.executeUpdate()
+            val deletedLogs: Int
+            val deletedExchanges: Int
+            if (retentionDays > 0) {
+                deletedLogs = deleteTimestampedRowsInBatches(conn, "rondo_log", retentionDays)
+                deletedExchanges = deleteTimestampedRowsInBatches(
+                    conn,
+                    "rondo_exchange_record",
+                    retentionDays
+                )
+            } else {
+                deletedLogs = 0
+                deletedExchanges = 0
             }
-            val deletedExchanges = conn.prepareStatement(
-                "DELETE FROM rondo_exchange_record WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)"
-            ).use { ps ->
-                ps.setInt(1, retentionDays)
-                ps.executeUpdate()
-            }
-            if (deletedLogs > 0 || deletedExchanges > 0) {
+            val deletedQuotas = deleteQuotaRowsInBatches(conn, exchangeQuotaCutoffMillis)
+            if (deletedLogs > 0 || deletedExchanges > 0 || deletedQuotas > 0) {
                 BlinkLog.info(
                     "Cleaned $deletedLogs expired transaction logs and " +
-                        "$deletedExchanges exchange audit records."
+                        "$deletedExchanges exchange audit records; " +
+                        "removed $deletedQuotas expired exchange quota rows."
                 )
             }
         }
+    }
+
+    private fun deleteTimestampedRowsInBatches(
+        conn: Connection,
+        table: String,
+        retentionDays: Int
+    ): Int {
+        var total = 0
+        do {
+            val deleted = conn.prepareStatement("""
+                DELETE FROM $table
+                WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+                ORDER BY created_at, id
+                LIMIT ?
+            """.trimIndent()).use { ps ->
+                ps.setInt(1, retentionDays)
+                ps.setInt(2, CLEANUP_BATCH_SIZE)
+                ps.executeUpdate()
+            }
+            total += deleted
+        } while (deleted == CLEANUP_BATCH_SIZE)
+        return total
+    }
+
+    private fun deleteQuotaRowsInBatches(conn: Connection, cutoffMillis: Long): Int {
+        if (cutoffMillis <= 0L) return 0
+        var total = 0
+        do {
+            val deleted = conn.prepareStatement("""
+                DELETE FROM rondo_exchange_quota
+                WHERE period_start < ?
+                ORDER BY period_start, player_uuid, rule_id
+                LIMIT ?
+            """.trimIndent()).use { ps ->
+                ps.setLong(1, cutoffMillis)
+                ps.setInt(2, CLEANUP_BATCH_SIZE)
+                ps.executeUpdate()
+            }
+            total += deleted
+        } while (deleted == CLEANUP_BATCH_SIZE)
+        return total
     }
 
     override fun queryRanking(currencyId: String, limit: Int): List<RankingData> {

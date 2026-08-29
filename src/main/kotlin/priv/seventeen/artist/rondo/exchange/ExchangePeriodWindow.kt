@@ -39,4 +39,15 @@ internal object ExchangePeriodWindow {
         }
         return startDate.atStartOfDay(now.zone).toInstant().toEpochMilli()
     }
+
+    /**
+     * 返回所有受支持周期中最早仍可能有效的起点。
+     */
+    fun oldestActiveStartMillis(now: ZonedDateTime = ZonedDateTime.now()): Long {
+        return listOf(
+            ExchangePeriod.DAILY,
+            ExchangePeriod.WEEKLY,
+            ExchangePeriod.MONTHLY
+        ).minOf { startMillis(it, now) }
+    }
 }

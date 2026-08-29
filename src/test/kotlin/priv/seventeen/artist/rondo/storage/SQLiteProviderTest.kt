@@ -28,6 +28,10 @@ import priv.seventeen.artist.rondo.log.TransactionLog
 import java.math.BigDecimal
 import java.nio.file.Path
 import java.sql.DriverManager
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -277,12 +281,123 @@ class SQLiteProviderTest {
             }
         }
 
-        storage.cleanExpiredLogs(30)
+        storage.cleanExpiredData(30, 0L)
 
         withRawConnection { conn ->
             assertEquals(0, countRows(conn, "rondo_log"))
             assertEquals(0, countRows(conn, "rondo_exchange_record"))
         }
+    }
+
+    @Test
+    fun `sixty day growth is cleaned in batches while permanent audit retention keeps logs`() {
+        val storage = createProvider()
+        val players = List(20) { UUID.randomUUID() }
+        val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(ZoneOffset.UTC)
+        val simulatedDays = (0..29) + (31..60)
+
+        withRawConnection { conn ->
+            conn.autoCommit = false
+            try {
+                conn.prepareStatement("""
+                    INSERT INTO rondo_log
+                        (player_uuid, currency_id, action, amount, balance, source, created_at)
+                    VALUES (?, 'gold', 'DEPOSIT', '1', '1', ?, ?)
+                """.trimIndent()).use { log ->
+                    conn.prepareStatement("""
+                        INSERT INTO rondo_exchange_record
+                            (player_uuid, rule_id, amount, created_at)
+                        VALUES (?, 'daily', '1', ?)
+                    """.trimIndent()).use { exchange ->
+                        conn.prepareStatement("""
+                            INSERT INTO rondo_exchange_quota
+                                (player_uuid, rule_id, period_start, amount)
+                            VALUES (?, 'daily', ?, '10')
+                        """.trimIndent()).use { quota ->
+                            for (day in simulatedDays) {
+                                val instant = now.minus(day.toLong(), ChronoUnit.DAYS)
+                                val timestamp = formatter.format(instant)
+                                for (player in players) {
+                                    repeat(10) { operation ->
+                                        log.setString(1, player.toString())
+                                        log.setString(2, "qa:$day:$operation")
+                                        log.setString(3, timestamp)
+                                        log.addBatch()
+
+                                        exchange.setString(1, player.toString())
+                                        exchange.setString(2, timestamp)
+                                        exchange.addBatch()
+                                    }
+                                    quota.setString(1, player.toString())
+                                    quota.setLong(2, instant.toEpochMilli())
+                                    quota.addBatch()
+                                }
+                            }
+                            log.executeBatch()
+                            exchange.executeBatch()
+                            quota.executeBatch()
+                        }
+                    }
+                }
+                conn.commit()
+            } catch (failure: Throwable) {
+                conn.rollback()
+                throw failure
+            } finally {
+                conn.autoCommit = true
+            }
+        }
+
+        val quotaCutoff = now.minus(30, ChronoUnit.DAYS).toEpochMilli()
+        storage.cleanExpiredData(-1, quotaCutoff)
+        withRawConnection { conn ->
+            assertEquals(12_000, countRows(conn, "rondo_log"))
+            assertEquals(12_000, countRows(conn, "rondo_exchange_record"))
+            assertEquals(600, countRows(conn, "rondo_exchange_quota"))
+        }
+
+        storage.cleanExpiredData(30, quotaCutoff)
+        withRawConnection { conn ->
+            assertEquals(6_000, countRows(conn, "rondo_log"))
+            assertEquals(6_000, countRows(conn, "rondo_exchange_record"))
+            assertEquals(600, countRows(conn, "rondo_exchange_quota"))
+        }
+    }
+
+    @Test
+    fun `logs with the same timestamp use newest id as stable tie breaker`() {
+        val storage = createProvider()
+        val player = UUID.randomUUID()
+        val timestamp = 1_700_000_000_000L
+        storage.insertLog(
+            TransactionLog(
+                playerUuid = player,
+                currencyId = "gold",
+                action = TransactionLog.Action.DEPOSIT,
+                amount = BigDecimal.ONE,
+                balanceAfter = BigDecimal.ONE,
+                source = "first",
+                timestamp = timestamp
+            )
+        )
+        storage.insertLog(
+            TransactionLog(
+                playerUuid = player,
+                currencyId = "gold",
+                action = TransactionLog.Action.DEPOSIT,
+                amount = BigDecimal.ONE,
+                balanceAfter = bd("2"),
+                source = "second",
+                timestamp = timestamp
+            )
+        )
+
+        assertEquals(
+            listOf("second", "first"),
+            storage.queryLogs(player, "gold", 1, 10).map { it.source }
+        )
     }
 
     @Test

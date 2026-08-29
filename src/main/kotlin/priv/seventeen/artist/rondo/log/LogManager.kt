@@ -20,6 +20,7 @@ import org.bukkit.scheduler.BukkitRunnable
 import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.blink.bukkitPlugin
 import priv.seventeen.artist.rondo.config.MainConfig
+import priv.seventeen.artist.rondo.exchange.ExchangePeriodWindow
 import priv.seventeen.artist.rondo.storage.StorageManager
 import java.io.File
 import java.io.FileOutputStream
@@ -53,17 +54,18 @@ object LogManager {
         maxQueueSize = config.performance.logQueueSize
 
         val retentionDays = config.features.logRetentionDays
-        if (retentionDays > 0) {
-            object : BukkitRunnable() {
-                override fun run() {
-                    try {
-                        StorageManager.provider.cleanExpiredLogs(retentionDays)
-                    } catch (e: Exception) {
-                        BlinkLog.warn("清理过期经济审计记录失败: ${e.message}")
-                    }
+        object : BukkitRunnable() {
+            override fun run() {
+                try {
+                    StorageManager.provider.cleanExpiredData(
+                        retentionDays,
+                        ExchangePeriodWindow.oldestActiveStartMillis()
+                    )
+                } catch (e: Exception) {
+                    BlinkLog.warn("清理过期经济数据失败: ${e.message}")
                 }
-            }.runTaskTimerAsynchronously(bukkitPlugin, 72_000L, 72_000L)
-        }
+            }
+        }.runTaskTimerAsynchronously(bukkitPlugin, 1_200L, 72_000L)
 
         if (!enabled) {
             BlinkLog.info("Transaction log disabled.")

@@ -75,13 +75,19 @@ object AccountManager {
         readCache.configure(config.performance.readCacheMaxOfflineEntries)
         running = true
 
-        if (offlineSnapshotTtlMillis > 0L) {
-            object : BukkitRunnable() {
-                override fun run() {
+        object : BukkitRunnable() {
+            override fun run() {
+                if (offlineSnapshotTtlMillis > 0L) {
                     readCache.removeExpired()
                 }
-            }.runTaskTimerAsynchronously(bukkitPlugin, 1_200L, 1_200L)
-        }
+                val now = System.currentTimeMillis()
+                readLoadRetryAfter.forEach { (playerUuid, retryAfter) ->
+                    if (retryAfter <= now) {
+                        readLoadRetryAfter.remove(playerUuid, retryAfter)
+                    }
+                }
+            }
+        }.runTaskTimerAsynchronously(bukkitPlugin, 1_200L, 1_200L)
     }
 
     /** 非阻塞探测展示快照；未命中时返回 null。 */

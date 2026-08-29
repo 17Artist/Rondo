@@ -86,8 +86,13 @@ interface StorageProvider {
     /** 查询流水日志 */
     fun queryLogs(playerUuid: UUID, currencyId: String?, page: Int, pageSize: Int): List<TransactionLog>
 
-    /** 清理过期日志 */
-    fun cleanExpiredLogs(retentionDays: Int)
+    /**
+     * 清理过期审计数据与已经结束的兑换额度窗口。
+     *
+     * `retentionDays=-1` 时永久保留审计记录，但额度窗口仍必须清理，避免不再参与
+     * 兑换的玩家留下永久增长的历史周期行。
+     */
+    fun cleanExpiredData(retentionDays: Int, exchangeQuotaCutoffMillis: Long)
 
     // ===== 排行榜 =====
 

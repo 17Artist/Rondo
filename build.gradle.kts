@@ -102,6 +102,12 @@ tasks.shadowJar {
     mergeServiceFiles()
 }
 
+tasks.processResources {
+    from(rootProject.file("LICENSE")) {
+        into("META-INF")
+    }
+}
+
 tasks.named("build") {
     dependsOn("shadowJar")
 }

@@ -38,6 +38,10 @@ class SQLiteProvider(
     private val logInitialization: Boolean = true
 ) : StorageProvider {
 
+    private companion object {
+        const val CLEANUP_BATCH_SIZE = 5_000
+    }
+
     private lateinit var connection: Connection
     private lateinit var databaseFile: File
     private val lock = Any()
@@ -114,6 +118,10 @@ class SQLiteProvider(
                 """.trimIndent())
 
                 stmt.executeUpdate("""
+                    CREATE INDEX IF NOT EXISTS idx_log_cleanup ON rondo_log (created_at, id)
+                """.trimIndent())
+
+                stmt.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS rondo_exchange_record (
                         id          INTEGER PRIMARY KEY AUTOINCREMENT,
                         player_uuid TEXT    NOT NULL,
@@ -128,6 +136,10 @@ class SQLiteProvider(
                 """.trimIndent())
 
                 stmt.executeUpdate("""
+                    CREATE INDEX IF NOT EXISTS idx_exchange_cleanup ON rondo_exchange_record (created_at, id)
+                """.trimIndent())
+
+                stmt.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS rondo_exchange_quota (
                         player_uuid TEXT NOT NULL,
                         rule_id     TEXT NOT NULL,
@@ -135,6 +147,10 @@ class SQLiteProvider(
                         amount      TEXT NOT NULL DEFAULT '0',
                         PRIMARY KEY (player_uuid, rule_id, period_start)
                     )
+                """.trimIndent())
+
+                stmt.executeUpdate("""
+                    CREATE INDEX IF NOT EXISTS idx_quota_period ON rondo_exchange_quota (period_start)
                 """.trimIndent())
 
                 stmt.executeUpdate("""
@@ -660,9 +676,9 @@ class SQLiteProvider(
         val result = mutableListOf<TransactionLog>()
         val offset = (page.toLong() - 1L) * pageSize.toLong()
         val sql = if (currencyId != null) {
-            "SELECT * FROM rondo_log WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT * FROM rondo_log WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         } else {
-            "SELECT * FROM rondo_log WHERE player_uuid = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT * FROM rondo_log WHERE player_uuid = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         }
         synchronized(lock) {
             getConnection().prepareStatement(sql).use { ps ->
@@ -692,30 +708,85 @@ class SQLiteProvider(
         return result
     }
 
-    override fun cleanExpiredLogs(retentionDays: Int) {
-        if (retentionDays <= 0) return
+    override fun cleanExpiredData(retentionDays: Int, exchangeQuotaCutoffMillis: Long) {
         synchronized(lock) {
             val conn = getConnection()
-            val modifier = "-$retentionDays days"
-            val deletedLogs = conn.prepareStatement(
-                "DELETE FROM rondo_log WHERE created_at < datetime('now', ?)"
-            ).use { ps ->
-                ps.setString(1, modifier)
-                ps.executeUpdate()
+            val deletedLogs: Int
+            val deletedExchanges: Int
+            if (retentionDays > 0) {
+                val modifier = "-$retentionDays days"
+                deletedLogs = deleteTimestampedRowsInBatches(
+                    conn,
+                    table = "rondo_log",
+                    modifier = modifier
+                )
+                deletedExchanges = deleteTimestampedRowsInBatches(
+                    conn,
+                    table = "rondo_exchange_record",
+                    modifier = modifier
+                )
+            } else {
+                deletedLogs = 0
+                deletedExchanges = 0
             }
-            val deletedExchanges = conn.prepareStatement(
-                "DELETE FROM rondo_exchange_record WHERE created_at < datetime('now', ?)"
-            ).use { ps ->
-                ps.setString(1, modifier)
-                ps.executeUpdate()
-            }
-            if (logInitialization && (deletedLogs > 0 || deletedExchanges > 0)) {
+            val deletedQuotas = deleteQuotaRowsInBatches(conn, exchangeQuotaCutoffMillis)
+            if (logInitialization &&
+                (deletedLogs > 0 || deletedExchanges > 0 || deletedQuotas > 0)
+            ) {
                 BlinkLog.info(
                     "Cleaned $deletedLogs expired transaction logs and " +
-                        "$deletedExchanges exchange audit records."
+                        "$deletedExchanges exchange audit records; " +
+                        "removed $deletedQuotas expired exchange quota rows."
                 )
             }
         }
+    }
+
+    private fun deleteTimestampedRowsInBatches(
+        conn: Connection,
+        table: String,
+        modifier: String
+    ): Int {
+        var total = 0
+        do {
+            val deleted = conn.prepareStatement("""
+                DELETE FROM $table
+                WHERE id IN (
+                    SELECT id FROM $table
+                    WHERE created_at < datetime('now', ?)
+                    ORDER BY created_at, id
+                    LIMIT ?
+                )
+            """.trimIndent()).use { ps ->
+                ps.setString(1, modifier)
+                ps.setInt(2, CLEANUP_BATCH_SIZE)
+                ps.executeUpdate()
+            }
+            total += deleted
+        } while (deleted == CLEANUP_BATCH_SIZE)
+        return total
+    }
+
+    private fun deleteQuotaRowsInBatches(conn: Connection, cutoffMillis: Long): Int {
+        if (cutoffMillis <= 0L) return 0
+        var total = 0
+        do {
+            val deleted = conn.prepareStatement("""
+                DELETE FROM rondo_exchange_quota
+                WHERE rowid IN (
+                    SELECT rowid FROM rondo_exchange_quota
+                    WHERE period_start < ?
+                    ORDER BY period_start, player_uuid, rule_id
+                    LIMIT ?
+                )
+            """.trimIndent()).use { ps ->
+                ps.setLong(1, cutoffMillis)
+                ps.setInt(2, CLEANUP_BATCH_SIZE)
+                ps.executeUpdate()
+            }
+            total += deleted
+        } while (deleted == CLEANUP_BATCH_SIZE)
+        return total
     }
 
     override fun queryRanking(currencyId: String, limit: Int): List<RankingData> {

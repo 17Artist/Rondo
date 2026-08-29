@@ -67,4 +67,26 @@ class ExchangePeriodWindowTest {
 
         assertEquals(0L, ExchangePeriodWindow.startMillis(ExchangePeriod.NONE, now))
     }
+
+    @Test
+    fun `quota cleanup cutoff keeps a weekly window that starts in previous month`() {
+        val zone = ZoneId.of("America/Toronto")
+        val now = ZonedDateTime.of(2026, 9, 1, 12, 0, 0, 0, zone)
+
+        assertEquals(
+            ZonedDateTime.of(2026, 8, 31, 0, 0, 0, 0, zone).toInstant().toEpochMilli(),
+            ExchangePeriodWindow.oldestActiveStartMillis(now)
+        )
+    }
+
+    @Test
+    fun `quota cleanup cutoff keeps the current monthly window when it is oldest`() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val now = ZonedDateTime.of(2026, 8, 29, 12, 0, 0, 0, zone)
+
+        assertEquals(
+            ZonedDateTime.of(2026, 8, 1, 0, 0, 0, 0, zone).toInstant().toEpochMilli(),
+            ExchangePeriodWindow.oldestActiveStartMillis(now)
+        )
+    }
 }
