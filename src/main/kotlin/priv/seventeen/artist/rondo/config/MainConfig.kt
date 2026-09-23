@@ -134,7 +134,7 @@ class StorageSection : BlinkSection() {
 class MySQLSection : BlinkSection() {
     companion object {
         const val DEFAULT_PARAMETERS =
-            "useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+            "useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true"
     }
 
     var host: String = "localhost"

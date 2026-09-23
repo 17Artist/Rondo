@@ -25,7 +25,6 @@ import priv.seventeen.artist.rondo.log.TransactionLog
 import priv.seventeen.artist.rondo.currency.MoneyConstraints
 import java.math.BigDecimal
 import java.sql.Connection
-import java.sql.Timestamp
 import java.util.UUID
 
 /**
@@ -52,6 +51,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
             maxLifetime = 1800000
             keepaliveTime = 120000
             poolName = "Rondo-HikariPool"
+            connectionInitSql = "SET time_zone = '+00:00'"
             addDataSourceProperty("cachePrepStmts", "true")
             addDataSourceProperty("prepStmtCacheSize", "250")
             addDataSourceProperty("prepStmtCacheSqlLimit", "2048")
@@ -664,7 +664,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
         getConnection().use { conn ->
             conn.prepareStatement("""
                 INSERT INTO rondo_log (player_uuid, currency_id, action, amount, balance, source, detail, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?))
             """.trimIndent()).use { ps ->
                 ps.setString(1, log.playerUuid.toString())
                 ps.setString(2, log.currencyId)
@@ -673,7 +673,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                 ps.setBigDecimal(5, log.balanceAfter)
                 ps.setString(6, log.source)
                 ps.setString(7, log.detail)
-                ps.setTimestamp(8, Timestamp(log.timestamp))
+                ps.setLong(8, log.timestamp / 1000L)
                 ps.executeUpdate()
             }
         }
@@ -686,7 +686,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
             try {
                 conn.prepareStatement("""
                     INSERT INTO rondo_log (player_uuid, currency_id, action, amount, balance, source, detail, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?))
                 """.trimIndent()).use { ps ->
                     for (log in logs) {
                         ps.setString(1, log.playerUuid.toString())
@@ -696,7 +696,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                         ps.setBigDecimal(5, log.balanceAfter)
                         ps.setString(6, log.source)
                         ps.setString(7, log.detail)
-                        ps.setTimestamp(8, Timestamp(log.timestamp))
+                        ps.setLong(8, log.timestamp / 1000L)
                         ps.addBatch()
                     }
                     ps.executeBatch()
@@ -714,10 +714,12 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
     override fun queryLogs(playerUuid: UUID, currencyId: String?, page: Int, pageSize: Int): List<TransactionLog> {
         val result = mutableListOf<TransactionLog>()
         val offset = (page.toLong() - 1L) * pageSize.toLong()
+        val selection = "SELECT player_uuid, currency_id, action, amount, balance, source, detail, " +
+            "UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM rondo_log"
         val sql = if (currencyId != null) {
-            "SELECT * FROM rondo_log WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+            "$selection WHERE player_uuid = ? AND currency_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         } else {
-            "SELECT * FROM rondo_log WHERE player_uuid = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+            "$selection WHERE player_uuid = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         }
         getConnection().use { conn ->
             conn.prepareStatement(sql).use { ps ->
@@ -736,7 +738,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
                             balanceAfter = rs.getBigDecimal("balance"),
                             source = rs.getString("source"),
                             detail = rs.getString("detail"),
-                            timestamp = rs.getTimestamp("created_at").time
+                            timestamp = rs.getLong("created_at_epoch") * 1000L
                         ))
                     }
                 }

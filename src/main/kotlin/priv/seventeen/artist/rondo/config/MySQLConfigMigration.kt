@@ -63,12 +63,11 @@ internal object MySQLConfigMigration {
             require(rawPublicKeyRetrieval is Boolean) {
                 "旧版 storage.mysql.allow-public-key-retrieval 必须是 true 或 false"
             }
-            // Preserve the exact connection behavior of published versions, including session time zone.
+            // Keep the published TLS and public-key settings; timestamp handling is independent of JDBC time-zone options.
             config.set(
                 PARAMETERS,
                 "sslMode=$sslMode&allowPublicKeyRetrieval=$rawPublicKeyRetrieval" +
-                    "&characterEncoding=UTF-8&useUnicode=true" +
-                    "&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+                    "&characterEncoding=UTF-8&useUnicode=true"
             )
         }
         config.set(SSL_MODE, null)
