@@ -24,6 +24,8 @@ plugins {
 group = "priv.seventeen.artist"
 version = providers.gradleProperty("version").getOrElse("1.1.0-SNAPSHOT")
 
+val mysqlConnectorVersion = "8.2.0"
+
 blink {
     name.set("Rondo")
     version.set(project.version.toString())
@@ -35,7 +37,7 @@ blink {
     logPrefix.set("§6♦ §eRondo")
     libraries.set(listOf(
         "com.zaxxer:HikariCP:5.1.0",
-        "com.mysql:mysql-connector-j:8.4.0",
+        "com.mysql:mysql-connector-j:$mysqlConnectorVersion",
         "org.xerial:sqlite-jdbc:3.44.1.0",
         "redis.clients:jedis:5.1.0",
         "org.apache.commons:commons-pool2:2.12.0"
@@ -77,13 +79,18 @@ dependencies {
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1")
     compileOnly("me.clip:placeholderapi:2.11.6")
     compileOnly("com.zaxxer:HikariCP:5.1.0")
-    compileOnly("com.mysql:mysql-connector-j:8.4.0")
+    compileOnly("com.mysql:mysql-connector-j:$mysqlConnectorVersion") {
+        isTransitive = false
+    }
     compileOnly("org.xerial:sqlite-jdbc:3.44.1.0")
     compileOnly("redis.clients:jedis:5.1.0")
     compileOnly("org.apache.commons:commons-pool2:2.12.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testImplementation("com.mysql:mysql-connector-j:$mysqlConnectorVersion") {
+        isTransitive = false
+    }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
     testRuntimeOnly("org.xerial:sqlite-jdbc:3.44.1.0")
 }

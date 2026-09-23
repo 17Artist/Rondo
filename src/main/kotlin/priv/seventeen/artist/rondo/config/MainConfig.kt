@@ -21,6 +21,7 @@ import priv.seventeen.artist.blink.config.BlinkConfig
 import priv.seventeen.artist.blink.config.BlinkSection
 import priv.seventeen.artist.blink.config.Comment
 import priv.seventeen.artist.blink.config.ConfigKey
+import priv.seventeen.artist.blink.BlinkLog
 
 /**
  * 主配置文件
@@ -44,6 +45,9 @@ class MainConfig : BlinkConfig(bukkitPlugin, "config") {
         lateinit var instance: MainConfig private set
         fun load() {
             val candidate = MainConfig()
+            MySQLConfigMigration.migrate(candidate.configFile.toPath())?.let { backup ->
+                BlinkLog.info("旧版 MySQL 连接配置已更新；原配置备份为 ${backup.fileName}")
+            }
             candidate.load()
             candidate.validate()
             instance = candidate
@@ -64,9 +68,16 @@ class MainConfig : BlinkConfig(bukkitPlugin, "config") {
             require(storage.mysql.database.matches(Regex("[A-Za-z0-9_-]{1,64}"))) {
                 "storage.mysql.database 只能包含字母、数字、下划线或连字符"
             }
-            require(storage.mysql.sslMode.uppercase() in setOf(
-                "DISABLED", "PREFERRED", "REQUIRED", "VERIFY_CA", "VERIFY_IDENTITY"
-            )) { "storage.mysql.ssl-mode 值无效" }
+            require(storage.mysql.parameters.isNotBlank()) {
+                "storage.mysql.parameters 不能为空"
+            }
+            require(!storage.mysql.parameters.startsWith("?") &&
+                !storage.mysql.parameters.startsWith("&")) {
+                "storage.mysql.parameters 不应以 ? 或 & 开头"
+            }
+            require(storage.mysql.parameters.none(Char::isWhitespace)) {
+                "storage.mysql.parameters 不能包含空白字符"
+            }
         }
 
         require(performance.logQueueSize in 100..100_000) {
@@ -121,19 +132,19 @@ class StorageSection : BlinkSection() {
 }
 
 class MySQLSection : BlinkSection() {
+    companion object {
+        const val DEFAULT_PARAMETERS =
+            "useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    }
+
     var host: String = "localhost"
     var port: Int = 3306
     var database: String = "rondo"
     var username: String = "rondo"
     var password: String = ""
 
-    @ConfigKey("ssl-mode")
-    @Comment("TLS 模式: DISABLED / PREFERRED / REQUIRED / VERIFY_CA / VERIFY_IDENTITY")
-    var sslMode: String = "PREFERRED"
-
-    @ConfigKey("allow-public-key-retrieval")
-    @Comment("是否允许非 TLS RSA 公钥检索；生产环境建议保持 false")
-    var allowPublicKeyRetrieval: Boolean = false
+    @Comment("JDBC 连接参数")
+    var parameters: String = DEFAULT_PARAMETERS
 
     @ConfigKey("pool-size")
     @Comment("连接池大小")

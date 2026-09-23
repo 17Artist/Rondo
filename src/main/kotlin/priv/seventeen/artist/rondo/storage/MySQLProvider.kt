@@ -20,6 +20,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import priv.seventeen.artist.blink.BlinkLog
 import priv.seventeen.artist.rondo.config.MainConfig
+import priv.seventeen.artist.rondo.config.MySQLSection
 import priv.seventeen.artist.rondo.log.TransactionLog
 import priv.seventeen.artist.rondo.currency.MoneyConstraints
 import java.math.BigDecimal
@@ -41,13 +42,7 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
     override fun initialize() {
         val mysql = config.storage.mysql
         val hikariConfig = HikariConfig().apply {
-            jdbcUrl = buildString {
-                append("jdbc:mysql://${mysql.host}:${mysql.port}/${mysql.database}")
-                append("?sslMode=${mysql.sslMode.uppercase()}")
-                append("&allowPublicKeyRetrieval=${mysql.allowPublicKeyRetrieval}")
-                append("&characterEncoding=UTF-8&useUnicode=true")
-                append("&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true")
-            }
+            jdbcUrl = buildMySqlJdbcUrl(mysql)
             username = mysql.username
             password = mysql.password
             maximumPoolSize = mysql.poolSize
@@ -870,3 +865,6 @@ class MySQLProvider(private val config: MainConfig) : StorageProvider {
     }
 
 }
+
+internal fun buildMySqlJdbcUrl(mysql: MySQLSection): String =
+    "jdbc:mysql://${mysql.host}:${mysql.port}/${mysql.database}?${mysql.parameters}"
