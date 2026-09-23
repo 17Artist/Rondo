@@ -22,7 +22,7 @@ plugins {
 }
 
 group = "priv.seventeen.artist"
-version = providers.gradleProperty("version").getOrElse("1.1.5-SNAPSHOT")
+version = providers.gradleProperty("version").getOrElse("1.1.6-SNAPSHOT")
 
 val mysqlConnectorVersion = "8.2.0"
 
